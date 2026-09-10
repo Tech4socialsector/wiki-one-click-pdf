@@ -237,19 +237,8 @@ def on_wiki_page_save(doc, method):
 
 
 def _safe_translate(text, lang, retries=3):
-    """Translate a short text string with retry logic."""
-    from wiki_pdf.pdf import translator, _recreate_translator
-    import time
+    """Translate a short text string using Groq LLM."""
+    from wiki_pdf.pdf import translate_text
     if not text or lang == "en":
         return text
-    for attempt in range(retries):
-        try:
-            result = translator.translate(text, dest=lang)
-            if result and result.text:
-                return result.text
-            raise ValueError("None result")
-        except Exception as e:
-            _recreate_translator()
-            if attempt < retries - 1:
-                time.sleep(2 * (attempt + 1))
-    return text  # fallback to original on all failures
+    return translate_text(text, lang)

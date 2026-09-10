@@ -15,108 +15,114 @@ from frappe import _
 
 
 
-# ✅ ADD THIS BLOCK HERE ↓↓↓
-import httpx
 from bs4 import BeautifulSoup, NavigableString
-from googletrans import Translator, LANGUAGES
 
-# Fix googletrans 4.0.0rc1 bug: stores raise_exception (lowercase) but reads
-# raise_Exception (uppercase E) on non-200 responses → AttributeError.
-# Patch the class so every Translator instance gets the default, not just ours.
-Translator.raise_Exception = False
-translator = Translator(timeout=httpx.Timeout(60.0))
-translator.raise_Exception = False
+# Supported language codes — used for normalization
+LANGUAGES = {
+    "en": "English", "kn": "Kannada", "ta": "Tamil", "hi": "Hindi",
+    "te": "Telugu", "mr": "Marathi", "bn": "Bengali", "gu": "Gujarati",
+    "ml": "Malayalam", "ur": "Urdu", "pa": "Punjabi", "or": "Odia",
+    "as": "Assamese", "sa": "Sanskrit", "gom": "Konkani", "doi": "Dogri",
+    "mai": "Maithili", "mni-mtei": "Meitei", "ne": "Nepali",
+    "sat": "Santali", "sd": "Sindhi", "tcy": "Tulu",
+}
+
+_groq_client = None
+
+def _get_groq_client():
+    global _groq_client
+    if _groq_client is None:
+        from groq import Groq
+        key = frappe.conf.get("gemini_api_key")
+        if not key:
+            raise ValueError("Groq API key not configured. Run: bench --site <site> set-config gemini_api_key <key>")
+        _groq_client = Groq(api_key=key)
+    return _groq_client
+
 
 def get_normalized_lang(lang):
     if not lang or lang == "en":
         return "en"
     lang = str(lang).lower().strip()
-    
-    # If the language isn't directly in the googletrans dict
     if lang not in LANGUAGES:
-        base_lang = lang.split('-')[0]
-        if base_lang in LANGUAGES:
-            lang = base_lang
-        elif 'zh' in lang:
-            lang = 'zh-cn'
-        
-    # Monkeypatch the LANGUAGES dict so googletrans won't crash with ValueError
+        base = lang.split("-")[0]
+        if base in LANGUAGES:
+            lang = base
     if lang not in LANGUAGES:
         LANGUAGES[lang] = lang
-        
     return lang
 
-def translate_text(text, lang="en"):
-    lang = get_normalized_lang(lang)
-    if not text or lang == "en":
-        return text
 
-    try:
-        # Split long text (important for large wiki pages)
-        chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
-        translated_chunks = []
-
-        for chunk in chunks:
-            translated = translator.translate(chunk, dest=lang)
-            translated_chunks.append(translated.text)
-
-        return "".join(translated_chunks)
-
-    except Exception as e:
-        frappe.logger().warning(f"Translation failed for lang {lang}: {e}")
-        return text
-
-def _recreate_translator():
-    """Recreate the global translator instance to fix stale connections."""
-    try:
-        import httpx as _httpx
-        from googletrans import Translator as _Tr
-        _Tr.raise_Exception = False
-        t = _Tr(timeout=_httpx.Timeout(60.0))
-        t.raise_Exception = False
-        globals()['translator'] = t
-    except Exception:
-        pass
-
-
-def _translate_single_node(text, lang, retries=3):
-    """Translate a single text node with retry. Returns original text on failure."""
-    import time
-    for attempt in range(retries):
+def _groq_translate_batch(texts, lang_code):
+    """Translate a list of strings to lang_code using Groq. Returns list of same length."""
+    import json as _json, time
+    lang_name = LANGUAGES.get(lang_code, lang_code)
+    client = _get_groq_client()
+    texts_json = _json.dumps(texts, ensure_ascii=False)
+    prompt = (
+        f"You are translating a childcare/creche protocol guide for anganwadi workers in India.\n"
+        f"Translate each text in this JSON array to {lang_name}.\n"
+        f"Rules:\n"
+        f"- Return ONLY a valid JSON array with exactly {len(texts)} elements in the same order\n"
+        f"- Keep proper nouns like ICDS, VHSND, Anganwadi, creche unchanged\n"
+        f"- Use simple language that field workers understand\n"
+        f"- No explanations, no markdown formatting, just the JSON array\n\n"
+        f"{texts_json}"
+    )
+    for attempt in range(3):
         try:
-            result = translator.translate(text, dest=lang)
-            if result is not None and result.text is not None:
-                return result.text
-            raise ValueError("Translator returned None")
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=4096,
+                temperature=0.1,
+            )
+            result = response.choices[0].message.content.strip()
+            # Strip markdown code fences if model adds them
+            if result.startswith("```"):
+                result = result.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            translated = _json.loads(result)
+            if isinstance(translated, list) and len(translated) == len(texts):
+                return [str(t) for t in translated]
+            raise ValueError(f"Count mismatch: expected {len(texts)}, got {len(translated)}")
         except Exception as e:
-            _recreate_translator()
-            if attempt < retries - 1:
+            if attempt < 2:
                 time.sleep(2 * (attempt + 1))
             else:
-                frappe.log_error(f"Single-node translation failed (lang={lang}): {str(e)}", "Translation Error")
-    return text  # fallback to original
+                frappe.log_error(f"Groq batch translation failed (lang={lang_code}): {e}", "Translation Error")
+    return texts  # fallback: return originals on all failures
+
+
+def translate_text(text, lang="en"):
+    lang_code = get_normalized_lang(lang)
+    if not text or lang_code == "en":
+        return text
+    try:
+        result = _groq_translate_batch([text], lang_code)
+        return result[0] if result else text
+    except Exception as e:
+        frappe.logger().warning(f"Translation failed for lang {lang_code}: {e}")
+        return text
+
+
+def _recreate_translator():
+    pass  # no-op — kept so tasks.py import doesn't break
 
 
 def translate_html(html_content, lang="en"):
-    """
-    Translates only the textual content of HTML nodes.
-    Prevents Google Translate from destroying markdown/html structure (e.g. tables).
-    Uses _XX_ as a delimiter to batch-translate text nodes in one API call.
-    """
+    """Translates text nodes in HTML using Groq LLM in JSON batches."""
     import time
-    lang = get_normalized_lang(lang)
-    if not html_content or lang == "en":
+    lang_code = get_normalized_lang(lang)
+    if not html_content or lang_code == "en":
         return html_content
 
     try:
         soup = BeautifulSoup(html_content, "html.parser")
 
-        # Gather all visible string nodes that actually have text
         nodes_to_translate = []
         texts_to_translate = []
         for node in soup.find_all(string=True):
-            # Skip empty nodes, script/style content, comments
-            if node.parent.name in ['style', 'script', 'head', 'title', 'meta', '[document]']:
+            if node.parent.name in ["style", "script", "head", "title", "meta", "[document]"]:
                 continue
             text = str(node).strip()
             if text and not text.isnumeric():
@@ -126,64 +132,33 @@ def translate_html(html_content, lang="en"):
         if not texts_to_translate:
             return html_content
 
-        DELIMITER = "\n||||\n"
-        MAX_LEN = 3500
-
+        # Batch: max 50 items or 3000 chars per batch
+        BATCH_SIZE = 50
+        MAX_CHARS = 3000
         batches = []
-        current_batch_nodes = []
-        current_batch_texts = []
-        current_len = 0
-
+        cur_nodes, cur_texts, cur_chars = [], [], 0
         for node, text in zip(nodes_to_translate, texts_to_translate):
-            text_len = len(text) + len(DELIMITER)
-            if current_len + text_len > MAX_LEN and current_batch_texts:
-                batches.append((current_batch_nodes, current_batch_texts))
-                current_batch_nodes = []
-                current_batch_texts = []
-                current_len = 0
-            current_batch_nodes.append(node)
-            current_batch_texts.append(text)
-            current_len += text_len
-
-        if current_batch_texts:
-            batches.append((current_batch_nodes, current_batch_texts))
+            if (len(cur_texts) >= BATCH_SIZE or cur_chars + len(text) > MAX_CHARS) and cur_texts:
+                batches.append((cur_nodes, cur_texts))
+                cur_nodes, cur_texts, cur_chars = [], [], 0
+            cur_nodes.append(node)
+            cur_texts.append(text)
+            cur_chars += len(text)
+        if cur_texts:
+            batches.append((cur_nodes, cur_texts))
 
         for batch_nodes, batch_texts in batches:
-            combined_text = DELIMITER.join(batch_texts)
-            retry = 0
-            translated_combined = combined_text
-
-            while retry < 3:
-                try:
-                    result = translator.translate(combined_text, dest=lang)
-                    if result is None or result.text is None:
-                        raise ValueError("Translator returned None")
-                    translated_combined = result.text
-                    break
-                except Exception as te:
-                    retry += 1
-                    _recreate_translator()
-                    if retry < 3:
-                        time.sleep(2 * retry)
-                    else:
-                        frappe.log_error(f"Chunk translation failed (lang={lang}): {str(te)}", "Translation Error")
-
-            translated_split = [part.strip() for part in translated_combined.split("||||")]
-
-            # Safe replacement: if sizes mismatch keep original for that node
-            for i, node in enumerate(batch_nodes):
-                if i < len(translated_split):
-                    node.replace_with(translated_split[i])
-                else:
-                    node.replace_with(batch_texts[i])
+            translated = _groq_translate_batch(batch_texts, lang_code)
+            for node, t in zip(batch_nodes, translated):
+                node.replace_with(t)
+            time.sleep(0.3)  # stay within Groq rate limits
 
         return str(soup)
+
     except Exception as e:
-        import traceback
-        frappe.log_error(f"HTML Translation failed for lang {lang}:\n{traceback.format_exc()}", "Translation Error")
+        frappe.log_error(f"translate_html failed (lang={lang_code}): {e}", "Translation Error")
         return html_content
 
-# ✅ END HERE ↑↑↑
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIG & HELPERS
