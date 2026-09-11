@@ -2,6 +2,7 @@ import frappe
 import pdfkit
 import markdown2
 import base64
+import functools
 import os
 import re
 import tempfile
@@ -577,7 +578,7 @@ def _post_process_pdf(main_html, groups, lang_code="en"):
                 level = "level-1" if group["label"] else "level-0"
                 toc_lines.append(f'<div class="toc-item {level}"><span class="toc-page">{p_num}</span><span class="toc-title">{title}</span><div class="toc-line"></div></div>')
         toc_lines.append('</div>')
-        return f"<html><head><meta charset='UTF-8'>{TOC_STYLE}</head><body>{''.join(toc_lines)}</body></html>"
+        return f"<html><head><meta charset='UTF-8'><style>{_oriya_font_face_css()}</style>{TOC_STYLE}</head><body>{''.join(toc_lines)}</body></html>"
 
     # Pass 1: Estimate TOC size
     toc_pdf = pdfkit.from_string(build_toc(0), False, options=_pdf_options(None))
@@ -758,8 +759,32 @@ def _pdf_options(footer_path, toc_xsl_path=None):
     }
     return opts
 
+@functools.lru_cache(maxsize=1)
+def _oriya_font_face_css():
+    """Base64-embeds Noto Sans Oriya so Odia renders correctly.
+
+    Frappe Cloud's wkhtmltopdf host doesn't have this font installed
+    system-wide (unlike the other Indic scripts), so without this the
+    'Noto Sans Oriya' family in PDF_CSS/TOC_STYLE silently falls through
+    to Georgia/serif and every Odia glyph renders as a black .notdef box.
+    """
+    font_dir = os.path.join(os.path.dirname(__file__), "public", "fonts")
+    faces = []
+    for weight, fname in [("normal", "NotoSansOriya-Regular.ttf"), ("bold", "NotoSansOriya-Bold.ttf")]:
+        path = os.path.join(font_dir, fname)
+        try:
+            with open(path, "rb") as f:
+                encoded = base64.b64encode(f.read()).decode()
+            faces.append(
+                f"@font-face {{ font-family: 'Noto Sans Oriya'; font-weight: {weight}; "
+                f"src: url(data:font/truetype;base64,{encoded}) format('truetype'); }}"
+            )
+        except FileNotFoundError:
+            frappe.logger().warning(f"Wiki PDF: font file missing: {path}")
+    return "\n".join(faces)
+
 def _wrap(body):
-    return f"<html><head><meta charset='UTF-8'><style>{PDF_CSS}</style></head><body>{body}</body></html>"
+    return f"<html><head><meta charset='UTF-8'><style>{_oriya_font_face_css()}\n{PDF_CSS}</style></head><body>{body}</body></html>"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN ENDPOINTS
