@@ -8,6 +8,13 @@ requires-python = ">=3.10"
 readme = "README.md"
 dynamic = ["version"]
 dependencies = [
+    "weasyprint>=62.0",
+    "markdown2>=2.4",
+    "beautifulsoup4>=4.12",
+    "pypdf>=4.0",
+    "google-cloud-translate>=3.15",
+    "google-generativeai>=0.8",
+    "anthropic>=0.34",
     "groq>=1.5.0"
 ]
 
