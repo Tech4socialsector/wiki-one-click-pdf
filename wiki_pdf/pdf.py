@@ -440,36 +440,60 @@ def _inline_images(html):
 
 
 def _split_tables(html, max_rows=25):
-    """Splits large tables into groups of `max_rows` rows so page-break-inside:avoid works."""
-
-    def _get_thead(table_html):
-        m = re.search(r"(<thead[^>]*>.*?</thead>)", table_html, re.DOTALL | re.IGNORECASE)
-        if m:
-            return m.group(1)
-        first = re.search(r"(<tr[^>]*>.*?</tr>)", table_html, re.DOTALL | re.IGNORECASE)
-        return f"<thead>{first.group(1)}</thead>" if first else ""
+    """Rebuilds every table into explicit <thead>/<tbody> (chunked into groups
+    of `max_rows` body rows, with a repeated header + "(continued...)" marker
+    between chunks) so:
+    - a header row can repeat via `thead { display: table-header-group }` in
+      PDF_CSS when a table breaks across a page -- many wiki tables are
+      hand-authored raw HTML with a bare first <tr> and no real <thead> at
+      all, so without this restructuring there's nothing for that CSS rule
+      to act on and continuation pages render headerless.
+    - an enormous table isn't rendered as a single unbreakable block.
+    Each chunk is still allowed to break across a page boundary between rows
+    (see TABLE_STYLE) -- only individual <tr> rows are protected from
+    splitting mid-row, via the base `tr { page-break-inside: avoid }` rule.
+    Forcing whole-table avoid here (even for a small chunk) caused text-heavy
+    tables to jump entirely to the next page, leaving a large blank gap under
+    a heading that ran out of room mid-page."""
 
     def _get_colgroup(table_html):
         m = re.search(r"(<colgroup[^>]*>.*?</colgroup>)", table_html, re.DOTALL | re.IGNORECASE)
         return m.group(1) if m else ""
 
-    def _get_tbody_rows(table_html):
-        tbody = re.search(r"<tbody[^>]*>(.*?)</tbody>", table_html, re.DOTALL | re.IGNORECASE)
-        src = tbody.group(1) if tbody else table_html
-        return re.findall(r"<tr[^>]*>.*?</tr>", src, re.DOTALL | re.IGNORECASE)
-
-    TABLE_STYLE = "width:100%;border-collapse:collapse;table-layout:fixed;font-size:10pt;margin:0;page-break-inside:avoid !important;"
+    TABLE_STYLE = "width:100%;border-collapse:collapse;table-layout:fixed;font-size:10pt;margin:0;"
 
     def process_table(match):
         table_html = match.group(0)
-        thead, colgroup, rows = _get_thead(table_html), _get_colgroup(table_html), _get_tbody_rows(table_html)
-        if len(rows) <= max_rows:
-            return re.sub(r"<table([^>]*)>", lambda m: f'<table{m.group(1)} style="{TABLE_STYLE}">', table_html, 1, re.IGNORECASE)
+        colgroup = _get_colgroup(table_html)
+
+        thead_full = re.search(r"(<thead[^>]*>.*?</thead>)", table_html, re.DOTALL | re.IGNORECASE)
+        tbody_match = re.search(r"<tbody[^>]*>(.*?)</tbody>", table_html, re.DOTALL | re.IGNORECASE)
+
+        # Body-row source must never overlap the header itself, or the header
+        # row gets duplicated as the first data row.
+        if tbody_match:
+            body_src = tbody_match.group(1)
+        elif thead_full:
+            body_src = table_html[thead_full.end():]
+        else:
+            body_src = table_html
+
+        if thead_full:
+            thead = thead_full.group(1)
+            rows = re.findall(r"<tr[^>]*>.*?</tr>", body_src, re.DOTALL | re.IGNORECASE)
+        else:
+            all_rows = re.findall(r"<tr[^>]*>.*?</tr>", body_src, re.DOTALL | re.IGNORECASE)
+            if not all_rows:
+                return re.sub(r"<table([^>]*)>", lambda m: f'<table{m.group(1)} style="{TABLE_STYLE}">', table_html, 1, re.IGNORECASE)
+            thead, rows = f"<thead>{all_rows[0]}</thead>", all_rows[1:]
+
+        if not rows:
+            return f'<table style="{TABLE_STYLE}">{colgroup}{thead}</table>'
 
         chunks = [rows[i : i + max_rows] for i in range(0, len(rows), max_rows)]
         parts = []
         for idx, chunk in enumerate(chunks):
-            continued = f'<div style="font-size:9pt;color:#555;text-align:right;margin-top:4pt;">(continued...)</div>' if idx > 0 else ""
+            continued = '<div style="font-size:9pt;color:#555;text-align:right;margin-top:4pt;">(continued...)</div>' if idx > 0 else ""
             parts.append(f'{continued}<table style="{TABLE_STYLE}">{colgroup}{thead}<tbody>{"".join(chunk)}</tbody></table>')
         return '\n<div style="margin:4pt 0;"></div>\n'.join(parts)
 
