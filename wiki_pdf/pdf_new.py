@@ -112,15 +112,33 @@ class GoogleTranslateProvider(Translator):
         return [r["translatedText"] for r in results]
 
 
+PROGRAM_CONTEXT = (
+    "The Creche Guidelines provide a common and practical reference for planning, setting up "
+    "and operating creches. They are designed to maintain consistent practices across key areas "
+    "such as child safety, nutrition, health, hygiene, growth monitoring, feeding, community "
+    "engagement and medical referrals in creche program.\n\n"
+    "The guidelines translate the Creche program's approach and objectives into clear, "
+    "actionable guidance for day-to-day implementation. They support teams in understanding "
+    "what needs to be done, how it should be done and when it should be done.\n\n"
+    "The overall purpose is to ensure that every creche provides a safe, nurturing and "
+    "responsive environment where children aged 7 months to 3 years receive appropriate care, "
+    "nutrition and support for healthy growth and development."
+)
+
+
 def _build_batch_prompt(texts, lang_name):
     texts_json = json.dumps(texts, ensure_ascii=False)
     return (
-        f"You are translating a childcare/creche protocol guide for anganwadi workers in India.\n"
+        f"You are translating a childcare/creche protocol guide for anganwadi workers in India.\n\n"
+        f"Program context:\n{PROGRAM_CONTEXT}\n\n"
         f"Translate each text in this JSON array to {lang_name}.\n"
         f"Rules:\n"
         f"- Return ONLY a valid JSON array with exactly {len(texts)} elements in the same order\n"
         f"- Keep proper nouns like ICDS, VHSND, Anganwadi, creche unchanged\n"
         f"- Use simple language that field workers understand\n"
+        f"- Respect local nuance and cultural context rather than translating literally\n"
+        f"- If translating a word or phrase would spoil or obscure its meaning, leave it in "
+        f"English rather than force a translation\n"
         f"- No explanations, no markdown formatting, just the JSON array\n\n"
         f"{texts_json}"
     )
