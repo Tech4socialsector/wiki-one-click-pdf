@@ -21,13 +21,12 @@ def trigger_pdf_generation():
     if "System Manager" not in frappe.get_roles(frappe.session.user):
         frappe.throw("Not allowed")
     from wiki_pdf.pdf import get_normalized_lang
-    frappe.cache().delete_value("wiki_pdf_regen_pending")
     cleared = []
     for lang in TARGET_LANGUAGES:
         lang_code = get_normalized_lang(lang)
         frappe.cache().delete_value(f"wiki_pdf_active_{lang_code}")
         cleared.append(lang_code)
-    generate_daily_translated_pdfs()
+    generate_weekly_translated_pdfs()
     return f"Cleared locks and enqueued jobs for: {cleared}"
 
 TARGET_LANGUAGES = [
@@ -166,9 +165,12 @@ def generate_pdf_for_single_language(lang):
             pass
 
 
-def generate_daily_translated_pdfs():
+def generate_weekly_translated_pdfs():
     """
-    Frappe daily scheduled task.
+    Frappe weekly scheduled task — the sole trigger for regenerating translated
+    PDFs (replaces the old on-save trigger, which re-translated all 22
+    languages after every Wiki Page edit; that made LLM translation cost scale
+    with edit frequency instead of being a predictable weekly cost).
     Enqueues one background job per language so each runs independently.
     """
     frappe.logger().info("Wiki PDF: Enqueueing per-language PDF generation jobs...")
@@ -207,33 +209,6 @@ def ensure_pdf_caches_exist():
             frappe.logger().info("Wiki PDF: All language PDFs already cached.")
     except Exception as e:
         frappe.logger().warning(f"Wiki PDF startup check failed: {e}")
-
-
-def on_wiki_page_save(doc, method):
-    """
-    Fires after any Wiki Page is saved.
-    Enqueues regeneration at most once per 15 minutes (cooldown) so a
-    30-minute editing session doesn't flood the queue.
-    Old PDFs stay on disk until the new generation completes and overwrites them,
-    so users can keep downloading while regeneration runs in the background.
-    """
-    from wiki_pdf.pdf import get_normalized_lang
-
-    # 15-minute cooldown — only enqueue once per editing window
-    cooldown_key = "wiki_pdf_regen_pending"
-    if frappe.cache().get_value(cooldown_key):
-        return
-
-    frappe.cache().set_value(cooldown_key, True, expires_in_sec=900)
-
-    enqueued = 0
-    for lang in TARGET_LANGUAGES:
-        lang_code = get_normalized_lang(lang)
-        if _enqueue_language(lang, lang_code):
-            enqueued += 1
-
-    if enqueued:
-        frappe.logger().info(f"Wiki PDF: Enqueued {enqueued} language jobs after Wiki Page save.")
 
 
 def _safe_translate(text, lang, retries=3):
