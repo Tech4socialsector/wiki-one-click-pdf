@@ -2,6 +2,7 @@ import frappe
 import time
 import os
 import glob
+import json
 
 
 @frappe.whitelist()
@@ -34,6 +35,37 @@ TARGET_LANGUAGES = [
     "or", "as", "sa", "gom", "doi", "mai", "mni-Mtei", "ne",
     "sat", "sd", "tcy"
 ]
+
+# Bump this whenever the translation prompt or provider changes meaningfully
+# (e.g. new program-context instructions, a different default model) so that
+# every per-page cache entry is treated as stale and re-translated once,
+# rather than silently keeping translations built under the old prompt.
+TRANSLATION_CACHE_VERSION = 1
+
+
+def _translation_cache_path(lang_code):
+    return frappe.get_site_path("private", "files", f"wiki_pdf_translation_cache_{lang_code}.json")
+
+
+def _load_translation_cache(lang_code):
+    path = _translation_cache_path(lang_code)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        frappe.logger().warning(f"Wiki PDF: could not read translation cache at {path}, starting fresh.")
+        return {}
+
+
+def _save_translation_cache(lang_code, cache):
+    path = _translation_cache_path(lang_code)
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False)
+    except Exception:
+        frappe.logger().warning(f"Wiki PDF: could not write translation cache at {path}.")
 
 
 def _enqueue_language(lang, lang_code):
@@ -97,47 +129,79 @@ def generate_pdf_for_single_language(lang):
             p.name: p for p in frappe.get_all(
                 "Wiki Page",
                 filters={"name": ["in", p_names]},
-                fields=["name", "title", "content"],
+                fields=["name", "title", "content", "modified"],
                 ignore_permissions=True,
                 limit=0,
             )
         }
 
+        translation_cache = _load_translation_cache(lang_code)
+        cache_hits = 0
+        cache_misses = 0
+
         groups = []
         group_counter = 1
         ref_counter = 1
 
-        for s in sidebar:
-            if s.wiki_page not in p_map:
-                continue
-            p = p_map[s.wiki_page]
-            label = s.parent_label or ""
+        try:
+            for s in sidebar:
+                if s.wiki_page not in p_map:
+                    continue
+                p = p_map[s.wiki_page]
+                label = s.parent_label or ""
 
-            if not groups or groups[-1]["raw_label"] != label:
-                translated_label = _safe_translate(label, lang_code) if label else label
-                groups.append({
-                    "raw_label": label,
-                    "label": translated_label,
-                    "number": group_counter,
-                    "anchor": f"GTOC-{group_counter}",
-                    "pages": []
+                if not groups or groups[-1]["raw_label"] != label:
+                    translated_label = _safe_translate(label, lang_code) if label else label
+                    groups.append({
+                        "raw_label": label,
+                        "label": translated_label,
+                        "number": group_counter,
+                        "anchor": f"GTOC-{group_counter}",
+                        "pages": []
+                    })
+                    group_counter += 1
+                    ref_counter = 1
+
+                modified_str = str(p.modified)
+                cached = translation_cache.get(p.name)
+                if (
+                    cached
+                    and cached.get("version") == TRANSLATION_CACHE_VERSION
+                    and cached.get("modified") == modified_str
+                ):
+                    translated_title = cached["title"]
+                    cleaned_content = cached["content_html"]
+                    cache_hits += 1
+                else:
+                    raw_html = _md_to_html(p.content or "")
+                    translated_html = translate_html(raw_html, lang_code)
+                    translated_title = _safe_translate(p.title, lang_code)
+                    cleaned_content = _clean_for_pdf(translated_html)
+                    translation_cache[p.name] = {
+                        "version": TRANSLATION_CACHE_VERSION,
+                        "modified": modified_str,
+                        "title": translated_title,
+                        "content_html": cleaned_content,
+                    }
+                    cache_misses += 1
+                    time.sleep(0.5)
+
+                full_number = f"{groups[-1]['number']}.{ref_counter}"
+                groups[-1]["pages"].append({
+                    "number": full_number,
+                    "title": translated_title,
+                    "anchor": f"PTOC-{full_number.replace('.', '-')}",
+                    "content_html": cleaned_content
                 })
-                group_counter += 1
-                ref_counter = 1
+                ref_counter += 1
+        finally:
+            # Persist whatever got translated even if the loop above raises partway
+            # through, so a crash doesn't throw away real translation cost already spent.
+            _save_translation_cache(lang_code, translation_cache)
 
-            raw_html = _md_to_html(p.content or "")
-            translated_html = translate_html(raw_html, lang_code)
-            translated_title = _safe_translate(p.title, lang_code)
-
-            full_number = f"{groups[-1]['number']}.{ref_counter}"
-            groups[-1]["pages"].append({
-                "number": full_number,
-                "title": translated_title,
-                "anchor": f"PTOC-{full_number.replace('.', '-')}",
-                "content_html": _clean_for_pdf(translated_html)
-            })
-            ref_counter += 1
-            time.sleep(0.5)
+        frappe.logger().info(
+            f"Wiki PDF: lang={lang_code} translation cache hits={cache_hits} misses={cache_misses}"
+        )
 
         if not groups or not any(g["pages"] for g in groups):
             frappe.logger().warning(f"Wiki PDF: No content for lang={lang_code}. Skipping.")
