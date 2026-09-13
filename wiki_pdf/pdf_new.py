@@ -195,10 +195,11 @@ class ClaudeProvider(_LLMTranslator):
         self._model = frappe.conf.get("claude_model") or "claude-haiku-4-5-20251001"
 
     def _call(self, prompt):
+        # temperature omitted -- the anthropic package installed on this
+        # server's messages.create() rejects it as an unexpected kwarg.
         response = self._client.messages.create(
             model=self._model,
             max_tokens=4096,
-            temperature=0.1,
             messages=[{"role": "user", "content": prompt}],
         )
         return response.content[0].text
