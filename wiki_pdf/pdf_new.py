@@ -196,7 +196,7 @@ class GeminiProvider(_LLMTranslator):
 
     def _call(self, prompt):
         response = self._model.generate_content(
-            prompt, generation_config={"temperature": 0.1, "max_output_tokens": 4096}
+            prompt, generation_config={"temperature": 0.1, "max_output_tokens": 8192}
         )
         return response.text
 
@@ -218,7 +218,7 @@ class ClaudeProvider(_LLMTranslator):
         # server's messages.create() rejects it as an unexpected kwarg.
         response = self._client.messages.create(
             model=self._model,
-            max_tokens=4096,
+            max_tokens=8192,
             messages=[{"role": "user", "content": prompt}],
         )
         return response.content[0].text
@@ -244,7 +244,7 @@ class GroqProvider(_LLMTranslator):
         response = self._client.chat.completions.create(
             model=self._model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=4096,
+            max_tokens=8192,
             temperature=0.1,
         )
         return response.choices[0].message.content
@@ -311,9 +311,15 @@ def translate_html(html_content, lang="en"):
         if not texts_to_translate:
             return html_content
 
-        # Batch: max 50 items or 3000 chars per batch
+        # Batch: max 50 items or 1200 input chars per batch. Kept well under
+        # the char count that would translate (in Indic scripts, factoring in
+        # JSON-array overhead) into more output tokens than max_output_tokens/
+        # max_tokens on the LLM call -- a larger threshold here silently
+        # truncated the translated JSON mid-array, which failed to parse and
+        # made translate_batch() fall back to returning the original English
+        # text for the whole batch (observed on real multi-paragraph pages).
         BATCH_SIZE = 50
-        MAX_CHARS = 3000
+        MAX_CHARS = 1200
         batches = []
         cur_nodes, cur_texts, cur_chars = [], [], 0
         for node, text in zip(nodes_to_translate, texts_to_translate):
