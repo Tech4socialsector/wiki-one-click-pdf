@@ -823,7 +823,7 @@ def _post_process_pdf(main_html, groups, lang_code="en"):
                 toc_lines.append(f'<div class="toc-item level-0"><span class="toc-page">{p_num}</span><span class="toc-title">{title}</span><div class="toc-line"></div></div>')
             for p_idx, page in enumerate(group["pages"]):
                 p_num = page_map.get(page["anchor"], 1) + shift
-                title = f"{page['number']} {page['title']}"
+                title = f"{page['number']} {page['title']}" if page.get("number") else page["title"]
                 level = "level-1" if group["label"] else "level-0"
                 toc_lines.append(f'<div class="toc-item {level}"><span class="toc-page">{p_num}</span><span class="toc-title">{title}</span><div class="toc-line"></div></div>')
         toc_lines.append("</div>")
