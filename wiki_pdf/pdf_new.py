@@ -174,7 +174,7 @@ class GeminiProvider(_LLMTranslator):
                 "Gemini API key not configured. Run: bench --site <site> set-config gemini_api_key <key>"
             )
         genai.configure(api_key=api_key)
-        self._model = genai.GenerativeModel(frappe.conf.get("gemini_model") or "gemini-2.0-flash")
+        self._model = genai.GenerativeModel(frappe.conf.get("gemini_model") or "gemini-3.6-flash")
 
     def _call(self, prompt):
         response = self._model.generate_content(
