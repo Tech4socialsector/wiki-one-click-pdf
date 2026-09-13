@@ -42,7 +42,7 @@ SCRIPT_RANGES = {
     "ur": (0x0600, 0x06FF), "sd": (0x0600, 0x06FF),
     "pa": (0x0A00, 0x0A7F),
     "or": (0x0B00, 0x0B7F),
-    "mni-mtei": (0xAAE0, 0xAAFF),
+    "mni-mtei": (0xABC0, 0xABFF),
     "sat": (0x1C50, 0x1C7F),
 }
 
@@ -495,7 +495,7 @@ def _clean_for_pdf(html):
 
 PDF_CSS = """
 @page { size: A4; margin: 15mm 18mm; }
-body { font-family: 'Noto Sans Telugu', 'Noto Sans Kannada', 'Noto Sans Tamil', 'Noto Sans Devanagari', 'Noto Sans Bengali', 'Noto Sans Malayalam', 'Noto Sans Gujarati', 'Noto Sans Gurmukhi', 'Noto Sans Oriya', 'Noto Sans Arabic', Georgia, serif; font-size: 11pt; line-height: 1.4; color: #111; margin: 0; padding: 0; }
+body { font-family: 'Noto Sans Telugu', 'Noto Sans Kannada', 'Noto Sans Tamil', 'Noto Sans Devanagari', 'Noto Sans Bengali', 'Noto Sans Malayalam', 'Noto Sans Gujarati', 'Noto Sans Gurmukhi', 'Noto Sans Oriya', 'Noto Sans Arabic', 'Noto Sans Meetei Mayek', 'Noto Sans Ol Chiki', Georgia, serif; font-size: 11pt; line-height: 1.4; color: #111; margin: 0; padding: 0; }
 h1.group-name { font-size: 22pt; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 4pt; margin-bottom: 14pt; page-break-after: avoid !important; }
 h1.page-title, h2.page-title { color: #1a52a0; font-size: 22pt; font-weight: bold; margin-bottom: 12pt; page-break-after: avoid !important; }
 h1 { font-size: 18pt; color: #222; margin-top: 14pt; margin-bottom: 6pt; page-break-after: avoid !important; }
@@ -525,7 +525,7 @@ TOC_TITLES = {
 
 TOC_STYLE = """
 <style>
-    body { font-family: 'Noto Sans Telugu', 'Noto Sans Kannada', 'Noto Sans Tamil', 'Noto Sans Devanagari', 'Noto Sans Bengali', 'Noto Sans Malayalam', 'Noto Sans Gujarati', 'Noto Sans Gurmukhi', 'Noto Sans Oriya', 'Noto Sans Arabic', Georgia, serif; padding: 20mm; margin: 0; color: #111; }
+    body { font-family: 'Noto Sans Telugu', 'Noto Sans Kannada', 'Noto Sans Tamil', 'Noto Sans Devanagari', 'Noto Sans Bengali', 'Noto Sans Malayalam', 'Noto Sans Gujarati', 'Noto Sans Gurmukhi', 'Noto Sans Oriya', 'Noto Sans Arabic', 'Noto Sans Meetei Mayek', 'Noto Sans Ol Chiki', Georgia, serif; padding: 20mm; margin: 0; color: #111; }
     h1 { font-size: 24pt; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 30px; }
     .toc-container { width: 100%; }
     .toc-item { clear: both; overflow: hidden; margin-bottom: 12pt; line-height: 1.2; }
@@ -556,6 +556,12 @@ def _embedded_font_face_css():
     for family, weight, fname in [
         ("Noto Sans Oriya", "normal", "NotoSansOriya-Regular.ttf"),
         ("Noto Sans Oriya", "bold", "NotoSansOriya-Bold.ttf"),
+        # Meetei Mayek (Manipuri) and Ol Chiki (Santali) have no system font at
+        # all on this server (confirmed via fc-list :lang=mni / :lang=sat --
+        # unlike Odia, this isn't a redeploy-persistence issue, there's simply
+        # no font installed). Only a Regular weight is available upstream.
+        ("Noto Sans Meetei Mayek", "normal", "NotoSansMeeteiMayek-Regular.ttf"),
+        ("Noto Sans Ol Chiki", "normal", "NotoSansOlChiki-Regular.ttf"),
     ]:
         path = os.path.join(font_dir, fname)
         try:
