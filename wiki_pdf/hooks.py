@@ -10,8 +10,12 @@ app_license = "MIT"
 web_include_js = "/assets/wiki_pdf/js/wiki_pdf.js"
 
 scheduler_events = {
-    "weekly": [
-        "wiki_pdf.tasks.generate_weekly_translated_pdfs"
-    ]
+    # Friday 6am (site timezone) so content edits made Mon-Thu are picked up,
+    # and the run finishes well before anyone is back editing next week.
+    "cron": {
+        "0 6 * * 5": [
+            "wiki_pdf.tasks.generate_weekly_translated_pdfs"
+        ]
+    }
 }
 
