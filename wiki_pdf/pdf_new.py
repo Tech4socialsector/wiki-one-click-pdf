@@ -1,4 +1,5 @@
 import base64
+import functools
 import io
 import json
 import os
@@ -520,8 +521,39 @@ TOC_STYLE = """
 """
 
 
+@functools.lru_cache(maxsize=1)
+def _embedded_font_face_css():
+    """Base64-embeds bundled fonts via @font-face rather than relying on the
+    server having them installed system-wide.
+
+    We tried relying on the server's installed fonts instead (Kannada/etc.
+    already work that way) -- but a manually `fc-cache`-installed font in
+    ~/.fonts does NOT survive a Frappe Cloud redeploy (each deploy is a
+    fresh container), so WeasyPrint silently fell back to the bitmap
+    "unifont" for Odia after the next deploy. Embedding the font directly
+    in the generated HTML is redeploy-proof since the .ttf files are
+    committed to the app itself."""
+    font_dir = os.path.join(os.path.dirname(__file__), "public", "fonts")
+    faces = []
+    for family, weight, fname in [
+        ("Noto Sans Oriya", "normal", "NotoSansOriya-Regular.ttf"),
+        ("Noto Sans Oriya", "bold", "NotoSansOriya-Bold.ttf"),
+    ]:
+        path = os.path.join(font_dir, fname)
+        try:
+            with open(path, "rb") as f:
+                encoded = base64.b64encode(f.read()).decode()
+            faces.append(
+                f"@font-face {{ font-family: '{family}'; font-weight: {weight}; "
+                f"src: url(data:font/truetype;base64,{encoded}) format('truetype'); }}"
+            )
+        except FileNotFoundError:
+            frappe.logger().warning(f"Wiki PDF: font file missing: {path}")
+    return "\n".join(faces)
+
+
 def _wrap(body):
-    return f"<html><head><meta charset='UTF-8'><style>{PDF_CSS}</style></head><body>{body}</body></html>"
+    return f"<html><head><meta charset='UTF-8'><style>{_embedded_font_face_css()}\n{PDF_CSS}</style></head><body>{body}</body></html>"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -795,7 +827,7 @@ def _post_process_pdf(main_html, groups, lang_code="en"):
                 level = "level-1" if group["label"] else "level-0"
                 toc_lines.append(f'<div class="toc-item {level}"><span class="toc-page">{p_num}</span><span class="toc-title">{title}</span><div class="toc-line"></div></div>')
         toc_lines.append("</div>")
-        return f"<html><head><meta charset='UTF-8'>{TOC_STYLE}</head><body>{''.join(toc_lines)}</body></html>"
+        return f"<html><head><meta charset='UTF-8'><style>{_embedded_font_face_css()}</style>{TOC_STYLE}</head><body>{''.join(toc_lines)}</body></html>"
 
     # Pass 1: estimate TOC size, pass 2: final TOC with correct shift
     toc_pdf = _render_pdf(build_toc(0))
