@@ -40,7 +40,7 @@ TARGET_LANGUAGES = [
 # (e.g. new program-context instructions, a different default model) so that
 # every per-page cache entry is treated as stale and re-translated once,
 # rather than silently keeping translations built under the old prompt.
-TRANSLATION_CACHE_VERSION = 1
+TRANSLATION_CACHE_VERSION = 2
 
 
 def _translation_cache_path(lang_code):
