@@ -559,7 +559,7 @@ TOC_STYLE = """
     h1 { font-size: 24pt; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 30px; }
     .toc-container { width: 100%; }
     .toc-item { clear: both; overflow: hidden; margin-bottom: 12pt; line-height: 1.2; }
-    .toc-title { float: left; white-space: nowrap; padding-right: 5px; }
+    .toc-title { float: left; padding-right: 5px; }
     .toc-page { float: right; white-space: nowrap; padding-left: 5px; font-weight: bold; color: #1a52a0; }
     .toc-line { overflow: hidden; border-bottom: 1px solid #999; height: 1.0em; }
     .level-0 .toc-title { font-weight: bold; font-size: 13pt; }
@@ -580,7 +580,22 @@ def _embedded_font_face_css():
     fresh container), so WeasyPrint silently fell back to the bitmap
     "unifont" for Odia after the next deploy. Embedding the font directly
     in the generated HTML is redeploy-proof since the .ttf files are
-    committed to the app itself."""
+    committed to the app itself.
+
+    Separately, and more seriously: relying on WeasyPrint's system-font
+    discovery + its own automatic font subsetting corrupts glyphs for large
+    (100+ page), heavily complex-script documents -- confirmed on Tamil,
+    where the *visual* text-layer of the generated PDF contained stray
+    Syriac-range codepoints injected mid-word (e.g. "கு0றபாடு" instead of
+    "குறைபாடு"), even though the same content rendered perfectly when
+    generated in isolation as a single page. Explicitly embedding the exact
+    same font file via @font-face (bypassing whatever WeasyPrint's own
+    discovery/subsetting path does differently at scale) eliminated the
+    corruption entirely, verified across a full ~426-page document with
+    zero corrupted characters. Embedding every major Indic script we
+    translate into here as a preventive measure, not just Tamil, since
+    there's no reason to believe the same large-document subsetting bug is
+    script-specific."""
     font_dir = os.path.join(os.path.dirname(__file__), "public", "fonts")
     faces = []
     for family, weight, fname in [
@@ -592,6 +607,26 @@ def _embedded_font_face_css():
         # no font installed). Only a Regular weight is available upstream.
         ("Noto Sans Meetei Mayek", "normal", "NotoSansMeeteiMayek-Regular.ttf"),
         ("Noto Sans Ol Chiki", "normal", "NotoSansOlChiki-Regular.ttf"),
+        # Major Indic scripts -- embedded to avoid the large-document glyph
+        # corruption bug described above (verified fixed for Tamil; embedding
+        # the rest preventively since they share the same conjunct-heavy,
+        # complex-script shaping that likely triggers it).
+        ("Noto Sans Tamil", "normal", "NotoSansTamil-Regular.ttf"),
+        ("Noto Sans Tamil", "bold", "NotoSansTamil-Bold.ttf"),
+        ("Noto Sans Devanagari", "normal", "NotoSansDevanagari-Regular.ttf"),
+        ("Noto Sans Devanagari", "bold", "NotoSansDevanagari-Bold.ttf"),
+        ("Noto Sans Kannada", "normal", "NotoSansKannada-Regular.ttf"),
+        ("Noto Sans Kannada", "bold", "NotoSansKannada-Bold.ttf"),
+        ("Noto Sans Telugu", "normal", "NotoSansTelugu-Regular.ttf"),
+        ("Noto Sans Telugu", "bold", "NotoSansTelugu-Bold.ttf"),
+        ("Noto Sans Malayalam", "normal", "NotoSansMalayalam-Regular.ttf"),
+        ("Noto Sans Malayalam", "bold", "NotoSansMalayalam-Bold.ttf"),
+        ("Noto Sans Gujarati", "normal", "NotoSansGujarati-Regular.ttf"),
+        ("Noto Sans Gujarati", "bold", "NotoSansGujarati-Bold.ttf"),
+        ("Noto Sans Gurmukhi", "normal", "NotoSansGurmukhi-Regular.ttf"),
+        ("Noto Sans Gurmukhi", "bold", "NotoSansGurmukhi-Bold.ttf"),
+        ("Noto Sans Bengali", "normal", "NotoSansBengali-Regular.ttf"),
+        ("Noto Sans Bengali", "bold", "NotoSansBengali-Bold.ttf"),
     ]:
         path = os.path.join(font_dir, fname)
         try:
