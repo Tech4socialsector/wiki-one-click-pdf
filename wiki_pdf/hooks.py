@@ -7,7 +7,21 @@ app_color = "grey"
 app_email = "mercy.selvanayagi@azimpremjifoundation.org"
 app_license = "MIT"
 
-web_include_js = "/assets/wiki_pdf/js/wiki_pdf.js"
+# A bundle, so every build gets a new hashed URL and browsers never keep
+# running a stale cached copy (plain /assets files are cached for 12 hours).
+web_include_js = "wiki_pdf.bundle.js"
+
+# Edits only mark the translated PDFs as outdated; they don't start a build
+# (that happens on download, the Friday job, or an admin trigger).
+doc_events = {
+    "Wiki Page": {
+        "on_update": "wiki_pdf.tasks.on_wiki_content_change",
+        "on_trash": "wiki_pdf.tasks.on_wiki_content_change",
+    },
+    "Wiki Space": {
+        "on_update": "wiki_pdf.tasks.on_wiki_content_change",
+    },
+}
 
 scheduler_events = {
     # Friday 6am (site timezone) so content edits made Mon-Thu are picked up,

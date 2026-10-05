@@ -1,0 +1,209 @@
+{
+ "actions": [],
+ "autoname": "field:language",
+ "creation": "2026-09-23 13:00:00.000000",
+ "description": "One record per language: which wiki content the published translated PDF was built from, and its build status.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "language",
+  "status",
+  "build_number",
+  "column_break_status",
+  "generated_at",
+  "file_url",
+  "file_size",
+  "section_source",
+  "built_fingerprint",
+  "built_snapshot_at",
+  "column_break_source",
+  "target_fingerprint",
+  "started_at",
+  "job_id",
+  "section_pages",
+  "pages_total",
+  "pages_translated",
+  "column_break_pages",
+  "pages_reused",
+  "pages_failed",
+  "section_errors",
+  "attempts",
+  "last_error"
+ ],
+ "fields": [
+  {
+   "fieldname": "language",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Language",
+   "reqd": 1,
+   "unique": 1,
+   "read_only": 1
+  },
+  {
+   "default": "Outdated",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Up to Date\nOutdated\nQueued\nUpdating\nFailed",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "build_number",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Build Number",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "generated_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Generated At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "file_url",
+   "fieldtype": "Data",
+   "label": "File URL",
+   "read_only": 1
+  },
+  {
+   "fieldname": "file_size",
+   "fieldtype": "Int",
+   "label": "File Size (bytes)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_source",
+   "fieldtype": "Section Break",
+   "label": "Source Version"
+  },
+  {
+   "description": "Fingerprint of the wiki content the published PDF was built from.",
+   "fieldname": "built_fingerprint",
+   "fieldtype": "Data",
+   "label": "Built Fingerprint",
+   "read_only": 1
+  },
+  {
+   "description": "When the published build read the wiki content. A build can only replace a PDF whose snapshot is older.",
+   "fieldname": "built_snapshot_at",
+   "fieldtype": "Datetime",
+   "label": "Built Snapshot At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_source",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Fingerprint the queued/running (or last attempted) build is working from.",
+   "fieldname": "target_fingerprint",
+   "fieldtype": "Data",
+   "label": "Target Fingerprint",
+   "read_only": 1
+  },
+  {
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "label": "Started At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "job_id",
+   "fieldtype": "Data",
+   "label": "Job ID",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_pages",
+   "fieldtype": "Section Break",
+   "label": "Pages"
+  },
+  {
+   "default": "0",
+   "fieldname": "pages_total",
+   "fieldtype": "Int",
+   "label": "Pages Total",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "pages_translated",
+   "fieldtype": "Int",
+   "label": "Pages Translated",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_pages",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "pages_reused",
+   "fieldtype": "Int",
+   "label": "Pages Reused From Cache",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "pages_failed",
+   "fieldtype": "Int",
+   "label": "Pages Failed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_errors",
+   "fieldtype": "Section Break",
+   "label": "Errors"
+  },
+  {
+   "default": "0",
+   "fieldname": "attempts",
+   "fieldtype": "Int",
+   "label": "Failed Attempts",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Long Text",
+   "label": "Last Error",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-09-23 15:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Wiki PDF",
+ "name": "Wiki PDF Build",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "language",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "language",
+ "in_create": 1
+}

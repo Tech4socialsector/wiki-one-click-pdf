@@ -80,6 +80,10 @@ def _validate_script(text, lang_code):
 # TRANSLATION PROVIDERS
 # ─────────────────────────────────────────────────────────────────────────────
 
+class TranslationError(Exception):
+    """A batch could not be translated after all retries."""
+
+
 class Translator:
     """Interface every translation provider implements."""
 
@@ -152,7 +156,12 @@ def _parse_batch_response(raw, expected_len):
     result = raw.strip()
     if result.startswith("```"):
         result = result.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-    translated = json.loads(result)
+    # Some models (e.g. DeepSeek) append a note after the array; decode only
+    # the first JSON value and ignore trailing text instead of failing.
+    start = result.find("[")
+    if start == -1:
+        raise ValueError("No JSON array in response")
+    translated, _ = json.JSONDecoder().raw_decode(result, start)
     if isinstance(translated, list) and len(translated) == expected_len:
         return [str(t) for t in translated]
     raise ValueError(f"Count mismatch: expected {expected_len}, got {len(translated)}")
@@ -177,13 +186,18 @@ class _LLMTranslator(Translator):
                 return _parse_batch_response(raw, len(texts))
             except Exception as e:
                 if attempt < 2:
-                    time.sleep(2 * (attempt + 1))
+                    # Rate limits (HTTP 429) need a longer pause than other errors.
+                    backoff = 20 if "429" in str(e) else 2
+                    time.sleep(backoff * (attempt + 1))
                 else:
                     frappe.log_error(
-                        f"{self.__class__.__name__} batch translation failed (lang={target_lang}): {e}",
-                        "Translation Error",
+                        title="Translation Error",
+                        message=f"{self.__class__.__name__} batch translation failed (lang={target_lang}): {e}",
                     )
-        return texts  # fallback: return originals on all failures
+                    # Raise rather than return the English originals, so callers
+                    # can tell a failed batch apart from a real translation (and
+                    # the PDF build doesn't cache English as the "translation").
+                    raise TranslationError(str(e)) from e
 
 
 class GeminiProvider(_LLMTranslator):
@@ -254,11 +268,55 @@ class GroqProvider(_LLMTranslator):
         return response.choices[0].message.content
 
 
+class DeepSeekProvider(_LLMTranslator):
+    """DeepSeek V3 via its OpenAI-compatible chat API, using plain requests
+    (no extra dependency). Accepts either a direct DeepSeek key or an
+    OpenRouter key (sk-or-...), which is routed through OpenRouter instead."""
+
+    def __init__(self):
+        api_key = frappe.conf.get("deepseek_api_key")
+        if not api_key:
+            raise ValueError(
+                "DeepSeek API key not configured. Run: bench --site <site> set-config deepseek_api_key <key>"
+            )
+        self._api_key = api_key
+        if api_key.startswith("sk-or-"):
+            self._url = "https://openrouter.ai/api/v1/chat/completions"
+            default_model = "deepseek/deepseek-chat"
+        else:
+            self._url = "https://api.deepseek.com/chat/completions"
+            default_model = "deepseek-chat"
+        self._model = frappe.conf.get("deepseek_model") or default_model
+
+    def _call(self, prompt):
+        import requests
+
+        response = requests.post(
+            self._url,
+            headers={"Authorization": f"Bearer {self._api_key}"},
+            json={
+                "model": self._model,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 8192,
+                "temperature": 0.1,
+            },
+            timeout=300,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if not data.get("choices"):
+            # OpenRouter can answer 200 with an {"error": ...} body when the
+            # upstream provider fails; surface that instead of a KeyError.
+            raise ValueError(f"No choices in response: {data.get('error') or data}")
+        return data["choices"][0]["message"]["content"]
+
+
 _PROVIDERS = {
     "google": GoogleTranslateProvider,
     "gemini": GeminiProvider,
     "claude": ClaudeProvider,
     "groq": GroqProvider,
+    "deepseek": DeepSeekProvider,
 }
 
 _translator_instance = None
@@ -279,7 +337,14 @@ def get_translator():
     return _translator_instance
 
 
-def translate_text(text, lang="en"):
+def _count_failure(stats):
+    if stats is not None:
+        stats["failed"] = stats.get("failed", 0) + 1
+
+
+def translate_text(text, lang="en", stats=None):
+    """Translates one string. On failure returns the original text; pass a
+    `stats` dict to have failures counted in stats["failed"]."""
     lang_code = get_normalized_lang(lang)
     if not text or lang_code == "en":
         return text
@@ -290,11 +355,14 @@ def translate_text(text, lang="en"):
         return translated
     except Exception as e:
         frappe.logger().warning(f"Translation failed for lang {lang_code}: {e}")
+        _count_failure(stats)
         return text
 
 
-def translate_html(html_content, lang="en"):
-    """Translates text nodes in HTML, batched through the configured provider."""
+def translate_html(html_content, lang="en", stats=None):
+    """Translates text nodes in HTML, batched through the configured provider.
+    A failed batch keeps its original text; pass a `stats` dict to have
+    failures counted in stats["failed"]."""
     lang_code = get_normalized_lang(lang)
     if not html_content or lang_code == "en":
         return html_content
@@ -338,7 +406,15 @@ def translate_html(html_content, lang="en"):
 
         translator = get_translator()
         for batch_nodes, batch_texts in batches:
-            translated = translator.translate_batch(batch_texts, lang_code)
+            try:
+                translated = translator.translate_batch(batch_texts, lang_code)
+            except Exception as e:
+                # Keep this batch's original text; the caller decides what to do.
+                frappe.logger().warning(
+                    f"Wiki PDF: batch of {len(batch_texts)} text(s) failed to translate to {lang_code!r}: {e!r}"
+                )
+                _count_failure(stats)
+                continue
             for node, t in zip(batch_nodes, translated):
                 _validate_script(t, lang_code)
                 node.replace_with(t)
@@ -347,15 +423,16 @@ def translate_html(html_content, lang="en"):
         return str(soup)
 
     except Exception as e:
-        frappe.log_error(f"translate_html failed (lang={lang_code}): {e}", "Translation Error")
+        frappe.log_error(title="Translation Error", message=f"translate_html failed (lang={lang_code}): {e}")
+        _count_failure(stats)
         return html_content
 
 
-def _safe_translate(text, lang):
+def _safe_translate(text, lang, stats=None):
     """Translate a short text string (titles/labels) using the configured provider."""
     if not text or lang == "en":
         return text
-    return translate_text(text, lang)
+    return translate_text(text, lang, stats=stats)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -391,7 +468,7 @@ def _md_to_html(text):
         except Exception:
             return f"<pre>{frappe.utils.escape_html(text)}</pre>"
     except Exception as e:
-        frappe.log_error(f"Markdown parsing error: {str(e)}", "Wiki PDF Markdown Error")
+        frappe.log_error(title="Wiki PDF Markdown Error", message=f"Markdown parsing error: {str(e)}")
         return f"<div>Error parsing content: {frappe.utils.escape_html(text[:100])}...</div>"
 
 
@@ -438,7 +515,7 @@ def _inline_images(html):
                         img["src"] = f"file://{os.path.abspath(test_path)}"
 
         except Exception as e:
-            frappe.log_error(f"Image resolution error for {src}: {str(e)}", "Wiki PDF Image Error")
+            frappe.log_error(title="Wiki PDF Image Error", message=f"Image resolution error for {src}: {str(e)}")
             img["src"] = fallback
     return str(soup)
 
@@ -708,7 +785,7 @@ def _add_page_numbers(pdf_bin, skip_first=False, skip_last=False, skip_count=1):
         writer.write(output)
         return output.getvalue()
     except Exception as e:
-        frappe.log_error(f"Page numbering error: {str(e)}", "Wiki PDF Error")
+        frappe.log_error(title="Wiki PDF Error", message=f"Page numbering error: {str(e)}")
         return pdf_bin
 
 
@@ -766,7 +843,12 @@ def _compress_pdf_gs(pdf_bin, label=""):
 def _save_pdf_to_cache(cache_fname, pdf_bin):
     """Compress, write PDF to disk, and create/update a File record."""
     pdf_bin = _compress_pdf_gs(pdf_bin, label=cache_fname)
+    _write_pdf_file(cache_fname, pdf_bin)
 
+
+def _write_pdf_file(cache_fname, pdf_bin):
+    """Atomically write an (already compressed) PDF to public/files and
+    create/update its File record."""
     file_path = os.path.join(frappe.get_site_path("public", "files"), cache_fname)
     tmp_path = file_path + ".tmp"
     with open(tmp_path, "wb") as f:
@@ -962,39 +1044,37 @@ def _post_process_pdf(main_html, groups, lang_code="en"):
 
 @frappe.whitelist(allow_guest=True)
 def check_wiki_pdf_status(lang="en"):
-    """Lightweight check — returns {ready, url} without streaming the file through Python."""
-    lang_code = get_normalized_lang(lang)
-    cache_fname = f"WikiPDF_DailyCache_{lang_code}.pdf"
-    file_path = os.path.join(frappe.get_site_path("public", "files"), cache_fname)
+    """Lightweight check — returns {ready, url, up_to_date, status} without
+    streaming the file through Python. `ready` still means "a PDF exists";
+    `up_to_date` says whether it matches the latest wiki content. An update
+    is queued automatically when it doesn't."""
+    from wiki_pdf.tasks import get_pdf_state
 
-    if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-        return {"ready": True, "url": f"/files/{cache_fname}"}
-
-    try:
-        from wiki_pdf.tasks import _enqueue_language
-        _enqueue_language(lang, lang_code)
-    except Exception:
-        pass
-
-    return {"ready": False, "url": None}
+    state = get_pdf_state(lang)
+    return {
+        "ready": state["has_pdf"],
+        "url": state["file_url"],
+        "up_to_date": state["status"] == "Up to Date",
+        "status": state["status"],
+    }
 
 
 @frappe.whitelist(allow_guest=True)
 def download_wiki_pdf(page_name=None, route=None, lang="en"):
+    """Legacy download endpoint: streams the latest available PDF. Also queues
+    an update when that PDF is older than the current wiki content, so older
+    callers still trigger a refresh. New UI uses wiki_pdf.api.get_pdf."""
     try:
-        lang_code = get_normalized_lang(lang)
+        from wiki_pdf.tasks import get_pdf_state, resolve_lang
+
+        lang_code = resolve_lang(lang)
+        get_pdf_state(lang_code)  # queues an update if the PDF is outdated
         pdf_bin = _load_pdf_from_cache(f"WikiPDF_DailyCache_{lang_code}.pdf")
         if pdf_bin:
             frappe.local.response.filename = "Creche_Guideline.pdf"
             frappe.local.response.filecontent = pdf_bin
             frappe.local.response.type = "download"
             return
-
-        try:
-            from wiki_pdf.tasks import _enqueue_language
-            _enqueue_language(lang, lang_code)
-        except Exception:
-            pass
 
         frappe.throw(
             "The PDF for this language is being prepared in the background. "
