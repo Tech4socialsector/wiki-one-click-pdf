@@ -558,7 +558,7 @@ def generate_pdf_for_single_language(lang):
         translation_cache = _load_translation_cache(lang_code)
         labels_cache = translation_cache.setdefault(LABELS_CACHE_KEY, {})
         translator_id = _translator_id() if lang_code != "en" else "none"
-        stats = {"translated": 0, "reused": 0, "failed": 0, "failed_labels": 0}
+        stats = {"translated": 0, "reused": 0, "failed": 0, "untranslated": 0, "failed_labels": 0}
 
         groups = []
         group_counter = 1
@@ -603,6 +603,9 @@ def generate_pdf_for_single_language(lang):
                         if cached and cached.get("content_html"):
                             translated_title = cached["title"]
                             cleaned_content = cached["content_html"]
+                        else:
+                            # No translation at all: this page would be (partly) English.
+                            stats["untranslated"] += 1
                     else:
                         translation_cache[p.name] = {
                             "version": TRANSLATION_CACHE_VERSION,
@@ -643,6 +646,16 @@ def generate_pdf_for_single_language(lang):
         if not any(g["pages"] for g in groups):
             raise Exception("No content to render.")
 
+        # Never replace an existing PDF with one where pages fell back to English
+        # (e.g. the translator is down or the API key is wrong). Keep the previous
+        # PDF and fail, so the problem is visible and the pages are retried.
+        if stats["untranslated"] and _pdf_exists(lang_code):
+            raise Exception(
+                f"{stats['untranslated']} of {stats['translated'] + stats['reused'] + stats['failed']} "
+                "page(s) could not be translated (see Error Log > Translation Error). "
+                "The previous PDF was kept."
+            )
+
         _db_ping()
         pdf_bin = _post_process_pdf(None, groups, lang_code=lang_code)
         if not pdf_bin:
@@ -665,13 +678,14 @@ def generate_pdf_for_single_language(lang):
             frappe.logger().error(f"Wiki PDF: could not re-queue lang={lang_code}: {frappe.get_traceback()}")
             _set_build(lang_code, status="Outdated")
 
-    except Exception:
+    except Exception as e:
         # Keep the previously published PDF; record the failure for retries/UI.
         frappe.logger().error(f"Wiki PDF generation failed for lang={lang_code}: {frappe.get_traceback()}")
         try:
             _db_ping()
             attempts = (frappe.db.get_value(BUILD_DOCTYPE, lang_code, "attempts") or 0) + 1
-            _set_build(lang_code, status="Failed", attempts=attempts, last_error=frappe.get_traceback()[-4000:])
+            last_error = f"{e}\n\n{frappe.get_traceback()}"[:4000]
+            _set_build(lang_code, status="Failed", attempts=attempts, last_error=last_error)
         except Exception:
             pass
     finally:

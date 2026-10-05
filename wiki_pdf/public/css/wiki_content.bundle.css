@@ -1,0 +1,31 @@
+/*
+ * Default style for all wiki page content (existing and new pages), so
+ * authors don't need to paste inline styles into each page:
+ * Tahoma 16px / 1.5, dark-blue left-aligned section headings, justified
+ * paragraphs.
+ *
+ * .wiki-content     - a published page
+ * .markdown-preview - the editor's live preview
+ * .preview-content  - the "review changes" preview of a pending patch
+ */
+.wiki-content,
+.markdown-preview,
+.preview-content {
+	font-family: Tahoma, sans-serif;
+	font-size: 16px;
+	line-height: 1.5;
+}
+
+.wiki-content h2,
+.markdown-preview h2,
+.preview-content h2 {
+	font-family: Tahoma, sans-serif !important;
+	color: #1f4e78 !important;
+	text-align: left !important;
+}
+
+.wiki-content p,
+.markdown-preview p,
+.preview-content p {
+	text-align: justify;
+}
