@@ -331,7 +331,9 @@ class DeepSeekProvider(_LLMTranslator):
                 "max_tokens": 8192,
                 "temperature": 0.1,
             },
-            timeout=300,
+            # A normal batch answers in well under a minute; don't let a hung
+            # request hold the batch for long before it's retried.
+            timeout=120,
         )
         response.raise_for_status()
         data = response.json()

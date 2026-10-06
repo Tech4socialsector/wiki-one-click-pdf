@@ -26,6 +26,7 @@
   "column_break_pages",
   "pages_reused",
   "pages_failed",
+  "build_timings",
   "section_errors",
   "attempts",
   "last_error"
@@ -161,6 +162,13 @@
    "read_only": 1
   },
   {
+   "fieldname": "build_timings",
+   "fieldtype": "Small Text",
+   "label": "Build Timings",
+   "read_only": 1,
+   "description": "How long each step of the last published build took."
+  },
+  {
    "fieldname": "section_errors",
    "fieldtype": "Section Break",
    "label": "Errors"
@@ -181,7 +189,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-09-23 15:00:00.000000",
+ "modified": "2026-10-06 13:40:00.000000",
  "modified_by": "Administrator",
  "module": "Wiki PDF",
  "name": "Wiki PDF Build",

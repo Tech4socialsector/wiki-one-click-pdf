@@ -9,6 +9,7 @@
   "enabled",
   "font",
   "custom_font",
+  "load_custom_font",
   "column_break_text",
   "font_size",
   "line_height",
@@ -70,8 +71,9 @@
    "fieldname": "font",
    "fieldtype": "Select",
    "label": "Font",
-   "options": "Tahoma\nArial\nVerdana\nGeorgia\nTimes New Roman\nNoto Sans\nSite Default\nCustom",
-   "default": "Tahoma"
+   "options": "Tahoma\nArial\nVerdana\nGeorgia\nTimes New Roman\nPoppins\nRoboto\nOpen Sans\nLato\nInter\nMontserrat\nNoto Sans\nSite Default\nCustom",
+   "default": "Tahoma",
+   "description": "Poppins, Roboto, Open Sans, Lato, Inter, Montserrat and Noto Sans are loaded from Google Fonts automatically."
   },
   {
    "fieldname": "custom_font",
@@ -79,7 +81,15 @@
    "label": "Custom Font",
    "depends_on": "eval:doc.font==\"Custom\"",
    "mandatory_depends_on": "eval:doc.font==\"Custom\"",
-   "description": "A CSS font name, e.g. \"Open Sans\", sans-serif. The font must be available to the browser."
+   "description": "A font name, e.g. Nunito, or a CSS font list, e.g. \"Open Sans\", sans-serif."
+  },
+  {
+   "fieldname": "load_custom_font",
+   "fieldtype": "Check",
+   "label": "Load Custom Font from Google Fonts",
+   "default": "1",
+   "depends_on": "eval:doc.font==\"Custom\"",
+   "description": "Untick if the font is already installed on readers' computers or loaded another way."
   },
   {
    "fieldname": "column_break_text",

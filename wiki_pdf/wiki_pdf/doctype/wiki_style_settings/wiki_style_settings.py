@@ -11,7 +11,7 @@ import frappe
 from frappe.model.document import Document
 
 DOCTYPE = "Wiki Style Settings"
-CSS_CACHE_KEY = "wiki_style_settings_css"
+CSS_CACHE_KEY = "wiki_style_settings_head"
 
 # Page content: published page, editor live preview, "review changes" preview.
 CONTENT = (".wiki-content", ".markdown-preview", ".preview-content")
@@ -22,9 +22,18 @@ FONT_STACKS = {
     "Verdana": "Verdana, Geneva, sans-serif",
     "Georgia": "Georgia, serif",
     "Times New Roman": "'Times New Roman', Times, serif",
+    "Poppins": "'Poppins', sans-serif",
+    "Roboto": "'Roboto', sans-serif",
+    "Open Sans": "'Open Sans', sans-serif",
+    "Lato": "'Lato', sans-serif",
+    "Inter": "'Inter', sans-serif",
+    "Montserrat": "'Montserrat', sans-serif",
     "Noto Sans": "'Noto Sans', sans-serif",
     "Site Default": None,
 }
+
+# Web fonts most readers won't have installed: loaded from Google Fonts.
+GOOGLE_FONTS = {"Poppins", "Roboto", "Open Sans", "Lato", "Inter", "Montserrat", "Noto Sans"}
 
 _COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
 _FONT_RE = re.compile(r"^[A-Za-z0-9 ,'\"-]+$")
@@ -50,23 +59,57 @@ class WikiStyleSettings(Document):
 
 
 def update_website_context(context):
-    """hooks.update_website_context: append the generated styles to <head>."""
+    """hooks.update_website_context: append the font link and generated
+    styles to <head>."""
     try:
-        css = get_css()
+        head = get_head_html()
     except Exception:
         # Styling must never break a page.
         frappe.logger().error(f"Wiki Style Settings: could not build CSS: {frappe.get_traceback()}")
         return
-    if css:
-        return {"head_html": (context.get("head_html") or "") + f'\n<style id="wiki-style-settings">{css}</style>'}
+    if head:
+        return {"head_html": (context.get("head_html") or "") + head}
 
 
-def get_css():
-    css = frappe.cache().get_value(CSS_CACHE_KEY)
-    if css is None:
-        css = build_css(frappe.get_cached_doc(DOCTYPE))
-        frappe.cache().set_value(CSS_CACHE_KEY, css)
-    return css
+def get_head_html():
+    head = frappe.cache().get_value(CSS_CACHE_KEY)
+    if head is None:
+        head = build_head_html(frappe.get_cached_doc(DOCTYPE))
+        frappe.cache().set_value(CSS_CACHE_KEY, head)
+    return head
+
+
+def build_head_html(s):
+    css = build_css(s)
+    if not css:
+        return ""
+    head = ""
+    family = _google_font_family(s)
+    if family:
+        url = f"https://fonts.googleapis.com/css2?family={family.replace(' ', '+')}:wght@400;500;600;700&display=swap"
+        head += (
+            '\n<link rel="preconnect" href="https://fonts.googleapis.com">'
+            '\n<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+            f'\n<link rel="stylesheet" href="{url}" id="wiki-style-settings-font">'
+        )
+    return head + f'\n<style id="wiki-style-settings">{css}</style>'
+
+
+def _google_font_family(s):
+    """The Google Fonts family to load, if any: a listed web font, or the
+    first name in a Custom font list when "Load from Google Fonts" is ticked."""
+    if not s.enabled:
+        return None
+    if s.font in GOOGLE_FONTS:
+        return s.font
+    if s.font == "Custom" and s.load_custom_font and s.custom_font and _FONT_RE.match(s.custom_font.strip()):
+        first = s.custom_font.split(",")[0].strip().strip("'\"").strip()
+        if first and re.fullmatch(r"[A-Za-z0-9 ]+", first) and first.lower() not in _GENERIC_FAMILIES:
+            return first
+    return None
+
+
+_GENERIC_FAMILIES = {"serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui"}
 
 
 def build_css(s):
@@ -139,7 +182,13 @@ def build_css(s):
 def _font_stack(s):
     if s.font == "Custom":
         custom = (s.custom_font or "").strip()
-        return custom if custom and _FONT_RE.match(custom) else None
+        if not custom or not _FONT_RE.match(custom):
+            return None
+        # A bare name like Poppins: quote it and add a fallback.
+        if "," not in custom:
+            name = custom.strip("'\"").strip()
+            return f"'{name}', sans-serif" if name.lower() not in _GENERIC_FAMILIES else name
+        return custom
     return FONT_STACKS.get(s.font)
 
 

@@ -91,14 +91,43 @@ function setup_wiki_pdf_download() {
     }
 
     // "Waiting in queue (#3)... 0:42" / "Updating PDF (ta)... 1:20"
-    function render_wait(lang, started_at) {
-        var label = 'Updating PDF (' + lang + ')';
-        if (wait_state && wait_state.status === 'Queued') {
-            label = wait_state.queue_position > 1
-                ? 'Waiting in queue (#' + wait_state.queue_position + ')'
-                : 'Starting update (' + lang + ')';
+    // "~20 min left", counting down between server checks.
+    function time_left(progress, received_at) {
+        if (!progress) return '';
+        var secs = progress.eta_seconds - (Date.now() - (received_at || Date.now())) / 1000;
+        if (secs < 60) return 'less than a minute left';
+        var mins = Math.round(secs / 60);
+        if (mins < 60) return '~' + mins + ' min left';
+        return '~' + Math.floor(mins / 60) + ' h ' + (mins % 60) + ' min left';
+    }
+
+    // "Progress: 45 / 79 pages · ~20 min left" / "Waiting in queue (#2)"
+    function progress_text(state, received_at) {
+        if (state.status === 'Queued') {
+            return state.queue_position > 1 ? 'Waiting in queue (#' + state.queue_position + ')' : 'Starting soon';
         }
-        set_busy(label + '... ' + format_elapsed(Date.now() - started_at));
+        var p = state.progress;
+        if (!p) return null;
+        if (p.phase === 'rendering') return 'Creating the PDF &middot; ' + time_left(p, received_at);
+        return p.done + ' / ' + p.total + ' pages &middot; ' + time_left(p, received_at);
+    }
+
+    // Button: "Updating PDF (ta) 45/79 · ~20 min left" / "Waiting in queue (#3)... 0:42"
+    function render_wait(lang, started_at) {
+        var s = wait_state || {};
+        var p = s.status === 'Updating' ? s.progress : null;
+        if (p && p.phase === 'rendering') {
+            set_busy('Creating PDF (' + lang + ') \u00b7 ' + time_left(p, s.received_at));
+        } else if (p) {
+            set_busy('Updating PDF (' + lang + ') ' + p.done + '/' + p.total + ' \u00b7 ' + time_left(p, s.received_at));
+        } else if (s.status === 'Queued') {
+            var label = s.queue_position > 1
+                ? 'Waiting in queue (#' + s.queue_position + ')'
+                : 'Starting update (' + lang + ')';
+            set_busy(label + '... ' + format_elapsed(Date.now() - started_at));
+        } else {
+            set_busy('Updating PDF (' + lang + ')... ' + format_elapsed(Date.now() - started_at));
+        }
     }
 
     function stop_waiting() {
@@ -110,7 +139,10 @@ function setup_wiki_pdf_download() {
 
     // Poll until the PDF matches the latest wiki content, then download it.
     function wait_for_latest(lang, started_at, state) {
-        if (state) wait_state = state;
+        if (state) {
+            wait_state = state;
+            wait_state.received_at = Date.now();
+        }
         render_wait(lang, started_at);
         if (!ticker) {
             ticker = setInterval(function () { render_wait(lang, started_at); }, 1000);
@@ -215,6 +247,8 @@ function setup_wiki_pdf_download() {
         var updated = updated_text(state);
         if (updated) rows.push(['Last updated', updated]);
         rows.push(['Latest changes', '<span class="wpdf-pill ' + opts.tone + '">' + opts.pill + '</span>']);
+        var progress = state.status !== 'Up to Date' && state.status !== 'Failed' ? progress_text(state) : null;
+        if (progress) rows.push(['Update progress', progress]);
 
         return '<div class="wpdf-popup">'
             + '<div class="wpdf-hero ' + opts.tone + '">'

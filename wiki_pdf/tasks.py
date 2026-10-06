@@ -391,6 +391,65 @@ def _should_yield(lang_code):
     return any(j in queued_job_ids for j in job_ids)
 
 
+# Live progress of a running build, kept in Redis (no DB writes per page) for
+# the "45/79 · ~20 min left" display.
+PROGRESS_TTL = 6 * 3600
+# Used for the estimate until the build has timed its own first page.
+DEFAULT_SECONDS_PER_PAGE = 35
+# Creating the PDF (render + compress) for the full guide takes ~40s per wiki
+# page on Frappe Cloud. Used until a language has a measured time.
+DEFAULT_RENDER_SECONDS_PER_PAGE = 40
+
+
+def _render_time_key(lang_code):
+    return f"wiki_pdf_render_seconds_{lang_code}"
+
+
+def _progress_key(lang_code):
+    return f"wiki_pdf_progress_{lang_code}"
+
+
+def _set_progress(lang_code, progress):
+    frappe.cache().set_value(
+        _progress_key(lang_code), dict(progress, updated=time.time()), expires_in_sec=PROGRESS_TTL
+    )
+
+
+def _clear_progress(lang_code):
+    frappe.cache().delete_value(_progress_key(lang_code))
+
+
+def get_build_progress(lang_code):
+    """{done, total, to_translate, translated, phase, eta_seconds} for a
+    running build, or None. The estimate uses this build's own average time
+    per translated page (pages reused from the cache take no time)."""
+    p = frappe.cache().get_value(_progress_key(lang_code))
+    if not p:
+        return None
+    # How long this language's last PDF creation took, else a per-page guess.
+    render_seconds = frappe.cache().get_value(_render_time_key(lang_code)) or (
+        p["total"] * DEFAULT_RENDER_SECONDS_PER_PAGE
+    )
+    if p["phase"] == "rendering":
+        eta = render_seconds - max(0.0, time.time() - p.get("rendering_started", time.time()))
+    else:
+        remaining = max(0, p["to_translate"] - p["translated"])
+        per_page = p["translate_seconds"] / p["translated"] if p["translated"] else DEFAULT_SECONDS_PER_PAGE
+        # Progress is saved between pages; count down through the current one
+        # so the estimate doesn't jump back up on every check.
+        since_update = max(0.0, time.time() - p.get("updated", time.time()))
+        eta = max(remaining * per_page - since_update, 0) + render_seconds
+    eta = max(eta, 15)
+    return {
+        "done": p["done"],
+        "total": p["total"],
+        "to_translate": p["to_translate"],
+        "translated": p["translated"],
+        "phase": p["phase"],
+        "eta_seconds": int(eta),
+    }
+
+
 class _StopForMaintenance(Exception):
     """Raised inside a build when the site goes into maintenance mode."""
 
@@ -497,6 +556,7 @@ def get_pdf_state(lang):
         "generated_at": rec.generated_at,
         # For the "Waiting in queue (#2)" / "Updating... 1:20" button text
         "queue_position": _queue_position(rec.job_id) if status == "Queued" else None,
+        "progress": get_build_progress(lang_code) if status == "Updating" else None,
         "elapsed_seconds": (
             int((now_datetime() - get_datetime(rec.started_at)).total_seconds())
             if status == "Updating" and rec.started_at else None
@@ -620,6 +680,21 @@ def generate_pdf_for_single_language(lang):
         translator_id = _translator_id() if lang_code != "en" else "none"
         stats = {"translated": 0, "reused": 0, "failed": 0, "untranslated": 0, "failed_labels": 0}
 
+        translate_started = time.time()
+        page_rows = [pages[s.wiki_page] for s in sidebar if s.wiki_page in pages]
+        progress = {
+            "total": len(page_rows),
+            "done": 0,
+            "to_translate": sum(
+                1 for p in page_rows
+                if not _cache_hit(translation_cache.get(p.name), p, _page_source_hash(p), lang_code)
+            ),
+            "translated": 0,
+            "translate_seconds": 0.0,
+            "phase": "translating",
+        }
+        _set_progress(lang_code, progress)
+
         groups = []
         group_counter = 1
         ref_counter = 1
@@ -650,6 +725,7 @@ def generate_pdf_for_single_language(lang):
                     cleaned_content = cached["content_html"]
                     stats["reused"] += 1
                 else:
+                    page_started = time.time()
                     page_stats = {}
                     raw_html = _md_to_html(p.content or "")
                     translated_html = translate_html(raw_html, lang_code, stats=page_stats)
@@ -681,8 +757,12 @@ def generate_pdf_for_single_language(lang):
                         # restart), the translations already paid for are kept.
                         _save_translation_cache(lang_code, translation_cache)
                     time.sleep(0.5)
+                    progress["translated"] += 1
+                    progress["translate_seconds"] += time.time() - page_started
 
                 _refresh_lock(lang_code)
+                progress["done"] += 1
+                _set_progress(lang_code, progress)
                 # Between pages: step aside if a user is waiting on another
                 # language. Translated pages are already cached, so nothing is lost.
                 try:
@@ -725,12 +805,21 @@ def generate_pdf_for_single_language(lang):
                 f"Reason: {stats.get('error') or 'see Error Log > Translation Error'}"
             )
 
+        stats["timings"] = {"translate": time.time() - translate_started}
+        progress["phase"] = "rendering"
+        progress["rendering_started"] = render_started = time.time()
+        _set_progress(lang_code, progress)
         _db_ping()
         pdf_bin = _post_process_pdf(None, groups, lang_code=lang_code)
         if not pdf_bin:
             raise Exception("PDF rendering returned an empty file.")
+        stats["timings"]["create"] = time.time() - render_started
+        compress_started = time.time()
         pdf_bin = _compress_pdf_gs(pdf_bin, label=cache_fname)
+        stats["timings"]["compress"] = time.time() - compress_started
         _refresh_lock(lang_code)
+        # Remember how long creating the PDF took, for the next estimate.
+        frappe.cache().set_value(_render_time_key(lang_code), int(time.time() - render_started))
 
         _publish(lang_code, cache_fname, pdf_bin, fp, snapshot_at, stats)
 
@@ -771,6 +860,7 @@ def generate_pdf_for_single_language(lang):
         # Always clear the lock so the next trigger can re-enqueue if needed
         # (unless this build re-queued itself and still owns it).
         try:
+            _clear_progress(lang_code)
             if not requeued:
                 _release_lock(lang_code)
                 if not _skip_followup:
@@ -854,11 +944,30 @@ def _publish(lang_code, cache_fname, pdf_bin, fp, snapshot_at, stats):
             pages_failed=stats["failed"],
             attempts=0 if complete else (cur.attempts or 0) + 1,
             last_error=" ".join(errors) or None,
+            build_timings=_format_timings(stats),
         )
         frappe.logger().info(f"Wiki PDF: Published {cache_fname} (status={status}).")
         return True
     finally:
         cache.delete(lock)
+
+
+def _format_timings(stats):
+    """E.g. 'Translate 12 min 30s (3 page(s) translated) · Create PDF 2 min 10s · Compress 18s'."""
+    t = stats.get("timings") or {}
+
+    def fmt(secs):
+        secs = int(secs or 0)
+        return f"{secs // 60} min {secs % 60}s" if secs >= 60 else f"{secs}s"
+
+    parts = []
+    if "translate" in t:
+        parts.append(f"Translate {fmt(t['translate'])} ({stats.get('translated', 0)} page(s) translated)")
+    if "create" in t:
+        parts.append(f"Create PDF {fmt(t['create'])}")
+    if "compress" in t:
+        parts.append(f"Compress {fmt(t['compress'])}")
+    return " · ".join(parts) or None
 
 
 def _settle_status(lang_code, fp):
