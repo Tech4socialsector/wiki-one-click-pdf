@@ -207,14 +207,15 @@ def _align(value):
     return {"Left": "left", "Center": "center", "Right": "right", "Justify": "justify"}.get(value)
 
 
-def build_pdf_css(s, script_fonts):
-    """The same look for the translated PDF: font, heading colours and
-    alignment, paragraph alignment, line spacing and link colour. Returns
-    (font_stylesheet_url or None, css). `script_fonts` is the PDF's Indian-script
-    font list; the chosen font only covers Latin text, so those come after it.
-    Sizes stay the PDF's own (pt), as web px sizes don't map well to print."""
+def build_pdf_css(s):
+    """The same look for the translated PDF: heading colours and alignment,
+    paragraph alignment, line spacing and link colour. Returns
+    (font_stylesheet_url or None, latin_font_family or None, css). The font
+    family isn't in the css: the PDF orders fonts per language (see
+    wiki_pdf.pdf._font_family_for). Sizes stay the PDF's own (pt), as web px
+    sizes don't map well to print."""
     if not s or not s.enabled:
-        return None, ""
+        return None, None, ""
     rules = []
 
     family = _google_font_family(s)
@@ -223,9 +224,7 @@ def build_pdf_css(s, script_fonts):
         if family else None
     )
     stack = _font_stack(s)
-    if stack:
-        first = stack.split(",")[0].strip()
-        rules.append(f"body {{ font-family: {first}, {script_fonts}, sans-serif; }}")
+    latin_family = stack.split(",")[0].strip() if stack else None
 
     if s.line_height:
         rules.append(f"body {{ line-height: {float(s.line_height):g}; }}")
@@ -267,7 +266,7 @@ def build_pdf_css(s, script_fonts):
         + ("text-decoration: underline; " if s.link_underline else "text-decoration: none; ")
         + "}"
     )
-    return font_url, "\n".join(rules)
+    return font_url, latin_family, "\n".join(rules)
 
 
 def pdf_style_signature():
@@ -277,7 +276,7 @@ def pdf_style_signature():
     import hashlib
 
     try:
-        font_url, css = build_pdf_css(frappe.get_cached_doc(DOCTYPE), "")
+        font_url, latin_family, css = build_pdf_css(frappe.get_cached_doc(DOCTYPE))
     except Exception:
         return ""
-    return hashlib.sha256(f"{font_url}|{css}".encode()).hexdigest()[:16]
+    return hashlib.sha256(f"{font_url}|{latin_family}|{css}".encode()).hexdigest()[:16]

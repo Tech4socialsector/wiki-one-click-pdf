@@ -696,6 +696,42 @@ SCRIPT_FONTS = (
     "'Noto Sans Oriya', 'Noto Sans Arabic', 'Noto Sans Meetei Mayek', 'Noto Sans Ol Chiki'"
 )
 
+# Each language's own script font. It must come FIRST in the PDF's font list:
+# the first font also draws the spaces, and when spaces and letters come from
+# different fonts, Chrome/Edge's PDF viewer (PDFium) loses the justification
+# spacing and lines end ragged (other viewers don't). The old list began with
+# Telugu, which broke justification for every other language in Chrome.
+LANG_SCRIPT_FONT = {
+    "ta": "'Noto Sans Tamil'",
+    "hi": "'Noto Sans Devanagari'", "mr": "'Noto Sans Devanagari'", "ne": "'Noto Sans Devanagari'",
+    "sa": "'Noto Sans Devanagari'", "doi": "'Noto Sans Devanagari'", "mai": "'Noto Sans Devanagari'",
+    "gom": "'Noto Sans Devanagari'",
+    "kn": "'Noto Sans Kannada'", "tcy": "'Noto Sans Kannada'",
+    "te": "'Noto Sans Telugu'",
+    "ml": "'Noto Sans Malayalam'",
+    "bn": "'Noto Sans Bengali'", "as": "'Noto Sans Bengali'",
+    "gu": "'Noto Sans Gujarati'",
+    "pa": "'Noto Sans Gurmukhi'",
+    "or": "'Noto Sans Oriya'",
+    "ur": "'Noto Sans Arabic'", "sd": "'Noto Sans Arabic'",
+    "mni-mtei": "'Noto Sans Meetei Mayek'",
+    "sat": "'Noto Sans Ol Chiki'",
+}
+
+
+def _font_family_for(lang_code, latin_family=None):
+    """Font list for a language's PDF: its own script font first (see
+    LANG_SCRIPT_FONT), then the Wiki Style Settings font for English words,
+    then the other scripts. English: the style font first."""
+    scripts = [f.strip() for f in SCRIPT_FONTS.split(",")]
+    primary = LANG_SCRIPT_FONT.get(lang_code)
+    if primary:
+        order = [primary, latin_family] + [f for f in scripts if f != primary]
+    else:
+        order = [latin_family] + scripts
+    return ", ".join(f for f in order if f) + ", sans-serif"
+
+
 # Light grey ("ash") for every border, so tables and boxes look light, as on the site.
 _BORDER = "#d9dce1"
 
@@ -830,20 +866,28 @@ def _embedded_font_face_css():
 
 
 def _style_settings_for_pdf():
-    """(font_stylesheet_url, css) from Wiki Style Settings, so the PDF looks
-    like the wiki pages. Never breaks a build."""
+    """(font_stylesheet_url, latin_font_family, css) from Wiki Style Settings,
+    so the PDF looks like the wiki pages. Never breaks a build."""
     try:
         from wiki_pdf.wiki_pdf.doctype.wiki_style_settings.wiki_style_settings import build_pdf_css
 
-        return build_pdf_css(frappe.get_cached_doc("Wiki Style Settings"), SCRIPT_FONTS)
+        return build_pdf_css(frappe.get_cached_doc("Wiki Style Settings"))
     except Exception:
         frappe.logger().warning(f"Wiki PDF: style settings not applied: {frappe.get_traceback()}")
-        return None, ""
+        return None, None, ""
 
 
-def _wrap(body):
-    font_url, style_css = _style_settings_for_pdf()
+def _font_head(lang_code):
+    """<head> parts for a language: the style font's stylesheet link (if
+    any), the style css, and the per-language font order."""
+    font_url, latin_family, style_css = _style_settings_for_pdf()
     font_link = f'<link rel="stylesheet" href="{font_url}">' if font_url else ""
+    font_rule = f"body {{ font-family: {_font_family_for(lang_code, latin_family)}; }}"
+    return font_link, f"{style_css}\n{font_rule}"
+
+
+def _wrap(body, lang_code="en"):
+    font_link, style_css = _font_head(lang_code)
     return (
         f"<html><head><meta charset='UTF-8'>{font_link}"
         f"<style>{_embedded_font_face_css()}\n{PDF_CSS}\n{style_css}</style></head><body>{body}</body></html>"
@@ -1053,7 +1097,7 @@ def _post_process_pdf(main_html, groups, lang_code="en"):
         anchor_html.append("\n".join(parts))
 
     full_body = "\n".join(anchor_html)
-    content_html = _inline_images(_wrap(full_body))
+    content_html = _inline_images(_wrap(full_body, lang_code))
 
     # Cover / back-cover image pages
     def _cover_page_html(mime, encoded):
@@ -1126,7 +1170,12 @@ def _post_process_pdf(main_html, groups, lang_code="en"):
                 level = "level-1" if group["label"] else "level-0"
                 toc_lines.append(f'<div class="toc-item {level}"><span class="toc-page">{p_num}</span><span class="toc-title">{title}</span><div class="toc-line"></div></div>')
         toc_lines.append("</div>")
-        return f"<html><head><meta charset='UTF-8'><style>{_embedded_font_face_css()}</style>{TOC_STYLE}</head><body>{''.join(toc_lines)}</body></html>"
+        font_link, _ = _font_head(lang_code)
+        font_rule = f"body {{ font-family: {_font_family_for(lang_code, _style_settings_for_pdf()[1])}; }}"
+        return (
+            f"<html><head><meta charset='UTF-8'>{font_link}<style>{_embedded_font_face_css()}</style>"
+            f"{TOC_STYLE}<style>{font_rule}</style></head><body>{''.join(toc_lines)}</body></html>"
+        )
 
     # Pass 1: estimate TOC size, pass 2: final TOC with correct shift
     toc_pdf = _render_pdf(build_toc(0))
