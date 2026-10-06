@@ -190,14 +190,14 @@ class _LLMTranslator(Translator):
                     backoff = 20 if "429" in str(e) else 2
                     time.sleep(backoff * (attempt + 1))
                 else:
-                    frappe.log_error(
-                        title="Translation Error",
-                        message=f"{self.__class__.__name__} batch translation failed (lang={target_lang}): {e}",
-                    )
                     # Raise rather than return the English originals, so callers
                     # can tell a failed batch apart from a real translation (and
                     # the PDF build doesn't cache English as the "translation").
-                    raise TranslationError(str(e)) from e
+                    # Callers log it: this may run in a worker thread, where
+                    # frappe.log_error isn't available.
+                    raise TranslationError(
+                        f"{self.__class__.__name__} batch translation failed (lang={target_lang}): {e}"
+                    ) from e
 
 
 class GeminiProvider(_LLMTranslator):
@@ -342,6 +342,31 @@ def _count_failure(stats):
         stats["failed"] = stats.get("failed", 0) + 1
 
 
+def _record_failure(stats, lang_code, n_texts, error):
+    """Count a failed batch, log it, and keep the first reason in
+    stats["error"] so the build record can show why translation failed."""
+    _count_failure(stats)
+    if stats is not None and not stats.get("error"):
+        stats["error"] = str(error)[:500]
+    frappe.logger().warning(
+        f"Wiki PDF: batch of {n_texts} text(s) failed to translate to {lang_code!r}: {error!r}"
+    )
+    try:
+        frappe.log_error(title="Translation Error", message=str(error))
+    except Exception:
+        pass
+
+
+def _translation_concurrency():
+    """How many translation batches to send at once (site config
+    wiki_pdf_translation_concurrency, default 4). Lower it if the provider
+    rate-limits (HTTP 429)."""
+    try:
+        return max(1, int(frappe.conf.get("wiki_pdf_translation_concurrency") or 4))
+    except (TypeError, ValueError):
+        return 4
+
+
 def translate_text(text, lang="en", stats=None):
     """Translates one string. On failure returns the original text; pass a
     `stats` dict to have failures counted in stats["failed"]."""
@@ -354,8 +379,7 @@ def translate_text(text, lang="en", stats=None):
         _validate_script(translated, lang_code)
         return translated
     except Exception as e:
-        frappe.logger().warning(f"Translation failed for lang {lang_code}: {e}")
-        _count_failure(stats)
+        _record_failure(stats, lang_code, 1, e)
         return text
 
 
@@ -405,26 +429,36 @@ def translate_html(html_content, lang="en", stats=None):
             batches.append((cur_nodes, cur_texts))
 
         translator = get_translator()
-        for batch_nodes, batch_texts in batches:
+
+        # Batches are independent, so send several at once: a long page is
+        # many batches, and each LLM call takes 10-60s. The provider calls only
+        # use their own HTTP client, so they're safe in threads; all Frappe
+        # calls (logging, script checks) stay on this thread.
+        def run(batch_texts):
             try:
-                translated = translator.translate_batch(batch_texts, lang_code)
+                return translator.translate_batch(batch_texts, lang_code)
             except Exception as e:
+                return e
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        workers = max(1, min(_translation_concurrency(), len(batches)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(run, [texts for _, texts in batches]))
+
+        for (batch_nodes, batch_texts), translated in zip(batches, results):
+            if isinstance(translated, Exception):
                 # Keep this batch's original text; the caller decides what to do.
-                frappe.logger().warning(
-                    f"Wiki PDF: batch of {len(batch_texts)} text(s) failed to translate to {lang_code!r}: {e!r}"
-                )
-                _count_failure(stats)
+                _record_failure(stats, lang_code, len(batch_texts), translated)
                 continue
             for node, t in zip(batch_nodes, translated):
                 _validate_script(t, lang_code)
                 node.replace_with(t)
-            time.sleep(0.3)  # stay within provider rate limits
 
         return str(soup)
 
     except Exception as e:
-        frappe.log_error(title="Translation Error", message=f"translate_html failed (lang={lang_code}): {e}")
-        _count_failure(stats)
+        _record_failure(stats, lang_code, 0, f"translate_html failed (lang={lang_code}): {e}")
         return html_content
 
 

@@ -55,6 +55,10 @@ LOCK_TTL_QUEUED = 3 * 3600
 LOCK_TTL_RUNNING = 15 * 60
 PUBLISH_LOCK_TTL = 120
 
+# A first build translates every page; with a slow LLM provider that can take
+# hours, and a build killed by the timeout publishes nothing.
+JOB_TIMEOUT = 6 * 3600
+
 # After this many failed builds for the same content, stop retrying
 # automatically on every download (the Friday job / admin can still retry).
 MAX_ATTEMPTS = 3
@@ -369,7 +373,7 @@ def _enqueue_build(lang_code, at_front=False):
         "wiki_pdf.tasks.generate_pdf_for_single_language",
         lang=lang_code,
         queue="long",
-        timeout=7200,
+        timeout=JOB_TIMEOUT,
         job_name=f"wiki_pdf_generate_{lang_code}",
         at_front=at_front,
     )
@@ -419,12 +423,17 @@ def get_pdf_state(lang):
     rec = _get_build(lang_code)
     has_pdf = bool(rec.file_url) and _pdf_exists(lang_code)
 
+    building = rec.status in ("Queued", "Updating") and frappe.cache().exists(_lock_key(lang_code))
     if result == "current":
         status = "Up to Date"
+    elif building:
+        # A build is running (e.g. a manual rebuild after retries ran out):
+        # show it, rather than "Failed" from the previous attempts.
+        status = rec.status
     elif result == "failed":
         status = "Failed"
     else:
-        status = rec.status if rec.status in ("Queued", "Updating") else "Queued"
+        status = "Queued"
 
     from wiki_pdf.pdf import LANGUAGES
 
@@ -521,6 +530,7 @@ def _translate_label(label, lang_code, labels_cache, stats):
     translated = _safe_translate(label, lang_code, stats=label_stats)
     if label_stats.get("failed"):
         stats["failed_labels"] += 1
+        stats["error"] = stats.get("error") or label_stats.get("error")
     else:
         labels_cache[label] = {"version": TRANSLATION_CACHE_VERSION, "text": translated}
     return translated
@@ -597,6 +607,7 @@ def generate_pdf_for_single_language(lang):
                     cleaned_content = _clean_for_pdf(translated_html)
 
                     if page_stats.get("failed"):
+                        stats["error"] = stats.get("error") or page_stats.get("error")
                         # Don't cache a partial/English result. Show the last good
                         # translation if there is one; the page is retried next build.
                         stats["failed"] += 1
@@ -616,6 +627,9 @@ def generate_pdf_for_single_language(lang):
                             "content_html": cleaned_content,
                         }
                         stats["translated"] += 1
+                        # Save as we go: if the job is killed (timeout, deploy,
+                        # restart), the translations already paid for are kept.
+                        _save_translation_cache(lang_code, translation_cache)
                     time.sleep(0.5)
 
                 _refresh_lock(lang_code)
@@ -652,8 +666,8 @@ def generate_pdf_for_single_language(lang):
         if stats["untranslated"] and _pdf_exists(lang_code):
             raise Exception(
                 f"{stats['untranslated']} of {stats['translated'] + stats['reused'] + stats['failed']} "
-                "page(s) could not be translated (see Error Log > Translation Error). "
-                "The previous PDF was kept."
+                "page(s) could not be translated; the previous PDF was kept. "
+                f"Reason: {stats.get('error') or 'see Error Log > Translation Error'}"
             )
 
         _db_ping()
@@ -756,6 +770,8 @@ def _publish(lang_code, cache_fname, pdf_bin, fp, snapshot_at, stats):
             )
         if stats["failed_labels"]:
             errors.append(f"{stats['failed_labels']} sidebar label(s) failed to translate.")
+        if stats.get("error"):
+            errors.append(f"Reason: {stats['error']}")
 
         _set_build(
             lang_code,
