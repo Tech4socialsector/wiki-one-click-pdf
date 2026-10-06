@@ -590,6 +590,20 @@ def _inline_images(html):
     return str(soup)
 
 
+def _fit_widths(fragment):
+    """Scale the percentage column widths in a <colgroup> or header row so
+    they add up to 100%. Wiki tables are often authored with widths like
+    30/60/70/60% (220%): browsers squeeze those to fit, but the PDF's fixed
+    table layout follows them literally and the last columns run off the
+    page."""
+    pattern = re.compile(r"(width\s*:\s*)(\d+(?:\.\d+)?)(\s*%)", re.IGNORECASE)
+    widths = [float(m.group(2)) for m in pattern.finditer(fragment)]
+    total = sum(widths)
+    if not widths or total <= 100:
+        return fragment
+    return pattern.sub(lambda m: f"{m.group(1)}{float(m.group(2)) * 100 / total:.2f}{m.group(3)}", fragment)
+
+
 def _split_tables(html, max_rows=25):
     """Rebuilds every table into explicit <thead>/<tbody> (chunked into groups
     of `max_rows` body rows, with a repeated header + "(continued...)" marker
@@ -609,7 +623,7 @@ def _split_tables(html, max_rows=25):
 
     def _get_colgroup(table_html):
         m = re.search(r"(<colgroup[^>]*>.*?</colgroup>)", table_html, re.DOTALL | re.IGNORECASE)
-        return m.group(1) if m else ""
+        return _fit_widths(m.group(1)) if m else ""
 
     TABLE_STYLE = "width:100%;border-collapse:collapse;table-layout:fixed;font-size:10pt;margin:0;"
 
@@ -630,13 +644,13 @@ def _split_tables(html, max_rows=25):
             body_src = table_html
 
         if thead_full:
-            thead = thead_full.group(1)
+            thead = _fit_widths(thead_full.group(1))
             rows = re.findall(r"<tr[^>]*>.*?</tr>", body_src, re.DOTALL | re.IGNORECASE)
         else:
             all_rows = re.findall(r"<tr[^>]*>.*?</tr>", body_src, re.DOTALL | re.IGNORECASE)
             if not all_rows:
                 return re.sub(r"<table([^>]*)>", lambda m: f'<table{m.group(1)} style="{TABLE_STYLE}">', table_html, 1, re.IGNORECASE)
-            thead, rows = f"<thead>{all_rows[0]}</thead>", all_rows[1:]
+            thead, rows = _fit_widths(f"<thead>{all_rows[0]}</thead>"), all_rows[1:]
 
         if not rows:
             return f'<table style="{TABLE_STYLE}">{colgroup}{thead}</table>'
@@ -690,9 +704,9 @@ thead { display: table-header-group !important; }
 tr { page-break-inside: avoid; }
 th, td { border: 1px solid #aaa; padding: 4pt 6pt; vertical-align: top; word-break: break-word; line-height: 1.2; }
 th { background-color: #eee; font-weight: bold; text-align: left; }
-blockquote { border: 1px solid #bbb; border-left: 4pt solid #555; background: #f7f7f7; padding: 8pt 14pt; margin: 8pt 0; page-break-inside: avoid; }
+blockquote { border: 1px solid #bbb; border-left: 4pt solid #555; background: #f7f7f7; padding: 8pt 14pt; margin: 8pt 0; page-break-inside: auto; }
 pre, code { background: #f4f4f4; font-family: monospace; border-radius: 3px; }
-pre { padding: 8pt; border: 1px solid #ddd; white-space: pre-wrap; margin: 6pt 0; page-break-inside: avoid; }
+pre { padding: 8pt; border: 1px solid #ddd; white-space: pre-wrap; margin: 6pt 0; page-break-inside: auto; }
 """
 
 TOC_TITLES = {
