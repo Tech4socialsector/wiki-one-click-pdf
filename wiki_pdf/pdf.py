@@ -625,7 +625,7 @@ def _split_tables(html, max_rows=25):
         m = re.search(r"(<colgroup[^>]*>.*?</colgroup>)", table_html, re.DOTALL | re.IGNORECASE)
         return _fit_widths(m.group(1)) if m else ""
 
-    TABLE_STYLE = "width:100%;border-collapse:collapse;table-layout:fixed;font-size:10pt;margin:0;"
+    TABLE_STYLE = "width:100%;border-collapse:collapse;table-layout:auto;margin:0;"
 
     def process_table(match):
         table_html = match.group(0)
@@ -673,7 +673,7 @@ def _clean_for_pdf(html):
             if "youtube.com/embed/" in url:
                 video_id = url.split("embed/")[1].split("?")[0]
                 url = f"https://www.youtube.com/watch?v={video_id}"
-            return f'<div style="border:1px solid #ccc;background:#f9f9f9;padding:6pt 10pt;margin:6pt 0;"><a href="{url}">Watch Video: {url}</a></div>'
+            return f'<div style="border:0.75pt solid #d9dce1;background:#f8f9fa;padding:6pt 10pt;margin:8pt 0;"><a href="{url}">Watch Video: {url}</a></div>'
         return match.group(0)
 
     html = re.sub(r"<(iframe|video)[^>]*>.*?</\1>", replace_media, html, flags=re.DOTALL | re.IGNORECASE)
@@ -688,28 +688,48 @@ def _clean_for_pdf(html):
 # CSS
 # ─────────────────────────────────────────────────────────────────────────────
 
-PDF_CSS = """
-@page { size: A4; margin: 15mm 18mm; }
-body { font-family: 'Noto Sans Telugu', 'Noto Sans Kannada', 'Noto Sans Tamil', 'Noto Sans Devanagari', 'Noto Sans Bengali', 'Noto Sans Malayalam', 'Noto Sans Gujarati', 'Noto Sans Gurmukhi', 'Noto Sans Oriya', 'Noto Sans Arabic', 'Noto Sans Meetei Mayek', 'Noto Sans Ol Chiki', Georgia, serif; font-size: 11pt; line-height: 1.4; color: #111; margin: 0; padding: 0; }
-h1.group-name { font-size: 22pt; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 4pt; margin-bottom: 14pt; page-break-after: avoid !important; }
-h1.page-title, h2.page-title { color: #1a52a0; font-size: 22pt; font-weight: bold; margin-bottom: 12pt; page-break-after: avoid !important; }
-h1 { font-size: 18pt; color: #222; margin-top: 14pt; margin-bottom: 6pt; page-break-after: avoid !important; }
-h2 { font-size: 16pt; color: #222; margin-top: 14pt; margin-bottom: 6pt; page-break-after: avoid !important; }
-h3 { font-size: 14pt; color: #222; margin-top: 12pt; margin-bottom: 4pt; page-break-after: avoid !important; }
-h4 { font-size: 12pt; color: #222; margin-top: 10pt; margin-bottom: 4pt; page-break-after: avoid !important; }
-p { margin: 4pt 0; }
+# Indian-script fonts (embedded via @font-face below). The Wiki Style Settings
+# font, if any, is put in front of these for Latin text.
+SCRIPT_FONTS = (
+    "'Noto Sans Tamil', 'Noto Sans Devanagari', 'Noto Sans Kannada', 'Noto Sans Telugu', "
+    "'Noto Sans Malayalam', 'Noto Sans Bengali', 'Noto Sans Gujarati', 'Noto Sans Gurmukhi', "
+    "'Noto Sans Oriya', 'Noto Sans Arabic', 'Noto Sans Meetei Mayek', 'Noto Sans Ol Chiki'"
+)
+
+# Light grey ("ash") for every border, so tables and boxes look light, as on the site.
+_BORDER = "#d9dce1"
+
+PDF_CSS = f"""
+@page {{ size: A4; margin: 20mm 20mm 22mm 20mm; }}
+body {{ font-family: {SCRIPT_FONTS}, sans-serif; font-size: 11pt; line-height: 1.6; color: #1f2328; margin: 0; padding: 0; }}
+h1.group-name {{ font-size: 22pt; font-weight: bold; color: #1f2328; border-bottom: 1.5pt solid {_BORDER}; padding-bottom: 6pt; margin: 0 0 16pt 0; page-break-after: avoid !important; }}
+h1.page-title, h2.page-title {{ color: #1f2328; font-size: 19pt; font-weight: bold; line-height: 1.3; margin: 0 0 14pt 0; page-break-after: avoid !important; }}
+h1 {{ font-size: 17pt; line-height: 1.35; color: #1f2328; margin: 18pt 0 8pt; page-break-after: avoid !important; }}
+h2 {{ font-size: 15pt; line-height: 1.35; color: #1f2328; margin: 16pt 0 7pt; page-break-after: avoid !important; }}
+h3 {{ font-size: 13pt; line-height: 1.35; color: #1f2328; margin: 14pt 0 6pt; page-break-after: avoid !important; }}
+h4 {{ font-size: 11.5pt; line-height: 1.35; color: #1f2328; margin: 12pt 0 5pt; page-break-after: avoid !important; }}
+p {{ margin: 0 0 9pt 0; orphans: 2; widows: 2; }}
 /* Body text is justified; short table-cell text reads better left-aligned. */
-p, li { text-align: justify; }
-th p, td p, th li, td li { text-align: left; }
-img { max-width: 100%; height: auto; display: block; margin: 8pt 0; }
-table { width: 100%; border-collapse: collapse; margin: 8pt 0; table-layout: fixed; font-size: 10pt; page-break-inside: auto; }
-thead { display: table-header-group !important; }
-tr { page-break-inside: avoid; }
-th, td { border: 1px solid #aaa; padding: 4pt 6pt; vertical-align: top; word-break: break-word; line-height: 1.2; }
-th { background-color: #eee; font-weight: bold; text-align: left; }
-blockquote { border: 1px solid #bbb; border-left: 4pt solid #555; background: #f7f7f7; padding: 8pt 14pt; margin: 8pt 0; page-break-inside: auto; }
-pre, code { background: #f4f4f4; font-family: monospace; border-radius: 3px; }
-pre { padding: 8pt; border: 1px solid #ddd; white-space: pre-wrap; margin: 6pt 0; page-break-inside: auto; }
+p, li {{ text-align: justify; }}
+th p, td p, th li, td li {{ text-align: left; }}
+ul, ol {{ margin: 0 0 9pt 0; padding-left: 20pt; }}
+li {{ margin-bottom: 4pt; }}
+a {{ color: #1565c0; text-decoration: underline; }}
+img {{ max-width: 100%; height: auto; display: block; margin: 10pt auto; }}
+hr {{ border: none; border-top: 1pt solid {_BORDER}; margin: 12pt 0; }}
+/* auto layout sizes columns by their content, like the browser does: a fixed
+   layout followed the authored % widths literally, cutting words such as
+   "Coordinator" in narrow columns and pushing text past the margin. */
+table {{ width: 100%; border-collapse: collapse; margin: 10pt 0 12pt; table-layout: auto; font-size: 9.5pt; line-height: 1.45; page-break-inside: auto; }}
+thead {{ display: table-header-group !important; }}
+tr {{ page-break-inside: avoid; }}
+th, td {{ border: 0.75pt solid {_BORDER}; padding: 5pt 7pt; vertical-align: top; word-break: break-word; }}
+th {{ background-color: #f3f4f6; font-weight: bold; text-align: left; }}
+th p, td p {{ margin: 0 0 3pt 0; }}
+blockquote {{ border: 0.75pt solid {_BORDER}; border-left: 3pt solid #c4c9d1; background: #f8f9fa; padding: 9pt 14pt; margin: 10pt 0; page-break-inside: auto; }}
+blockquote p:last-child {{ margin-bottom: 0; }}
+pre, code {{ background: #f6f8fa; font-family: monospace; border-radius: 3px; }}
+pre {{ padding: 8pt; border: 0.75pt solid {_BORDER}; white-space: pre-wrap; margin: 8pt 0; page-break-inside: auto; }}
 """
 
 TOC_TITLES = {
@@ -723,13 +743,13 @@ TOC_TITLES = {
 
 TOC_STYLE = """
 <style>
-    body { font-family: 'Noto Sans Telugu', 'Noto Sans Kannada', 'Noto Sans Tamil', 'Noto Sans Devanagari', 'Noto Sans Bengali', 'Noto Sans Malayalam', 'Noto Sans Gujarati', 'Noto Sans Gurmukhi', 'Noto Sans Oriya', 'Noto Sans Arabic', 'Noto Sans Meetei Mayek', 'Noto Sans Ol Chiki', Georgia, serif; padding: 20mm; margin: 0; color: #111; }
-    h1 { font-size: 24pt; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 30px; }
+    body { font-family: 'Noto Sans Telugu', 'Noto Sans Kannada', 'Noto Sans Tamil', 'Noto Sans Devanagari', 'Noto Sans Bengali', 'Noto Sans Malayalam', 'Noto Sans Gujarati', 'Noto Sans Gurmukhi', 'Noto Sans Oriya', 'Noto Sans Arabic', 'Noto Sans Meetei Mayek', 'Noto Sans Ol Chiki', sans-serif; padding: 20mm; margin: 0; color: #111; }
+    h1 { font-size: 24pt; font-weight: bold; border-bottom: 1.5pt solid #d9dce1; padding-bottom: 10px; margin-bottom: 30px; }
     .toc-container { width: 100%; }
     .toc-item { clear: both; overflow: hidden; margin-bottom: 12pt; line-height: 1.2; }
     .toc-title { float: left; padding-right: 5px; }
     .toc-page { float: right; white-space: nowrap; padding-left: 5px; font-weight: bold; color: #1a52a0; }
-    .toc-line { overflow: hidden; border-bottom: 1px solid #999; height: 1.0em; }
+    .toc-line { overflow: hidden; border-bottom: 1px dotted #c4c9d1; height: 1.0em; }
     .level-0 .toc-title { font-weight: bold; font-size: 13pt; }
     .level-1 { padding-left: 25px; }
     .level-1 .toc-title { font-size: 11pt; color: #444; }
@@ -809,8 +829,25 @@ def _embedded_font_face_css():
     return "\n".join(faces)
 
 
+def _style_settings_for_pdf():
+    """(font_stylesheet_url, css) from Wiki Style Settings, so the PDF looks
+    like the wiki pages. Never breaks a build."""
+    try:
+        from wiki_pdf.wiki_pdf.doctype.wiki_style_settings.wiki_style_settings import build_pdf_css
+
+        return build_pdf_css(frappe.get_cached_doc("Wiki Style Settings"), SCRIPT_FONTS)
+    except Exception:
+        frappe.logger().warning(f"Wiki PDF: style settings not applied: {frappe.get_traceback()}")
+        return None, ""
+
+
 def _wrap(body):
-    return f"<html><head><meta charset='UTF-8'><style>{_embedded_font_face_css()}\n{PDF_CSS}</style></head><body>{body}</body></html>"
+    font_url, style_css = _style_settings_for_pdf()
+    font_link = f'<link rel="stylesheet" href="{font_url}">' if font_url else ""
+    return (
+        f"<html><head><meta charset='UTF-8'>{font_link}"
+        f"<style>{_embedded_font_face_css()}\n{PDF_CSS}\n{style_css}</style></head><body>{body}</body></html>"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -843,7 +880,7 @@ def _add_page_numbers(pdf_bin, skip_first=False, skip_last=False, skip_count=1):
             else:
                 page_num = i + 1
                 footer_divs.append(
-                    f'<div style="{page_break}width:210mm;height:20mm;position:relative;font-family:Georgia,serif;font-size:10pt;">'
+                    f'<div style="{page_break}width:210mm;height:20mm;position:relative;font-family:sans-serif;font-size:9pt;color:#6b7280;">'
                     f'<div style="position:absolute;bottom:2mm;width:100%;text-align:center;">{page_num}</div>'
                     f'</div>'
                 )

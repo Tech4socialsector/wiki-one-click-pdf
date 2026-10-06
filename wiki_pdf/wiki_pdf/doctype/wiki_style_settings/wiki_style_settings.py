@@ -51,6 +51,12 @@ class WikiStyleSettings(Document):
 
     def on_update(self):
         frappe.cache().delete_value(CSS_CACHE_KEY)
+        # The PDFs follow these settings too: the source fingerprint includes
+        # them, so drop the cached one to mark the PDFs outdated straight away.
+        frappe.cache().delete_value("wiki_pdf_source_fingerprint")
+        from wiki_pdf.tasks import _mark_outdated_after_commit
+
+        frappe.db.after_commit.add(_mark_outdated_after_commit)
         # Pages rendered for guests may be cached as a whole; drop them so the
         # new styles show straight away.
         from frappe.website.utils import clear_cache
@@ -199,3 +205,79 @@ def _color(value):
 
 def _align(value):
     return {"Left": "left", "Center": "center", "Right": "right", "Justify": "justify"}.get(value)
+
+
+def build_pdf_css(s, script_fonts):
+    """The same look for the translated PDF: font, heading colours and
+    alignment, paragraph alignment, line spacing and link colour. Returns
+    (font_stylesheet_url or None, css). `script_fonts` is the PDF's Indian-script
+    font list; the chosen font only covers Latin text, so those come after it.
+    Sizes stay the PDF's own (pt), as web px sizes don't map well to print."""
+    if not s or not s.enabled:
+        return None, ""
+    rules = []
+
+    family = _google_font_family(s)
+    font_url = (
+        f"https://fonts.googleapis.com/css2?family={family.replace(' ', '+')}:wght@400;600;700&display=swap"
+        if family else None
+    )
+    stack = _font_stack(s)
+    if stack:
+        first = stack.split(",")[0].strip()
+        rules.append(f"body {{ font-family: {first}, {script_fonts}, sans-serif; }}")
+
+    if s.line_height:
+        rules.append(f"body {{ line-height: {float(s.line_height):g}; }}")
+    if _color(s.text_color):
+        rules.append(f"body {{ color: {_color(s.text_color)}; }}")
+
+    align = _align(s.paragraph_align)
+    pcolor = _color(s.paragraph_color)
+    p_decl = " ".join(d for d in (
+        f"text-align: {align};" if align else None,
+        f"color: {pcolor};" if pcolor else None,
+    ) if d)
+    if p_decl:
+        rules.append(f"p, li {{ {p_decl} }}")
+        # Narrow table cells read badly justified.
+        rules.append("th p, td p, th li, td li { text-align: left; }")
+
+    # Content headings only: the PDF's own page titles / section names keep
+    # their style unless "Also Style the Page Title" is ticked.
+    for n in (1, 2, 3, 4):
+        selector = f"h{n}:not(.page-title):not(.group-name)"
+        if n == 1 and s.style_page_title:
+            selector += ", .page-title"
+        hcolor = _color(s.get(f"h{n}_color"))
+        halign = _align(s.get(f"h{n}_align"))
+        weight = {"Normal": "400", "Bold": "700"}.get(s.get(f"h{n}_bold"))
+        decl = " ".join(d for d in (
+            f"color: {hcolor} !important;" if hcolor else None,
+            f"text-align: {halign};" if halign else None,
+            f"font-weight: {weight};" if weight else None,
+        ) if d)
+        if decl:
+            rules.append(f"{selector} {{ {decl} }}")
+
+    lcolor = _color(s.link_color)
+    rules.append(
+        "a { "
+        + (f"color: {lcolor}; " if lcolor else "")
+        + ("text-decoration: underline; " if s.link_underline else "text-decoration: none; ")
+        + "}"
+    )
+    return font_url, "\n".join(rules)
+
+
+def pdf_style_signature():
+    """Changes when the PDF-relevant style settings change; part of the PDF
+    source fingerprint, so a style change marks every PDF outdated (they are
+    re-created from cached translations, nothing is re-translated)."""
+    import hashlib
+
+    try:
+        font_url, css = build_pdf_css(frappe.get_cached_doc(DOCTYPE), "")
+    except Exception:
+        return ""
+    return hashlib.sha256(f"{font_url}|{css}".encode()).hexdigest()[:16]

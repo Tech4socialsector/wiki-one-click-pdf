@@ -189,8 +189,17 @@ def _fingerprint(sidebar, pages):
         p = pages.get(s.wiki_page)
         if p:
             items.append([s.parent_label or "", p.name, p.title or "", p.content_sha])
+    from wiki_pdf.wiki_pdf.doctype.wiki_style_settings.wiki_style_settings import pdf_style_signature
+
     payload = json.dumps(
-        {"schema": FINGERPRINT_SCHEMA, "tcv": TRANSLATION_CACHE_VERSION, "items": items},
+        {
+            "schema": FINGERPRINT_SCHEMA,
+            "tcv": TRANSLATION_CACHE_VERSION,
+            "items": items,
+            # The PDF follows Wiki Style Settings: a style change re-creates the
+            # PDFs (from cached translations; nothing is re-translated).
+            "style": pdf_style_signature(),
+        },
         ensure_ascii=False,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
