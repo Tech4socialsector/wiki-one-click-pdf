@@ -4,6 +4,7 @@ frappe.ready(function () {
     }
 });
 
+
 function get_selected_language() {
     var combo = document.querySelector('.goog-te-combo');
     if (combo && combo.value && combo.value !== '' && combo.value !== 'en') {
