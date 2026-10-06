@@ -364,6 +364,20 @@ def _should_yield(lang_code):
     return any(j in queued_job_ids for j in job_ids)
 
 
+class _StopForMaintenance(Exception):
+    """Raised inside a build when the site goes into maintenance mode."""
+
+
+def _in_maintenance():
+    """True while the site is in maintenance mode, e.g. during a Frappe Cloud
+    update. Read from site_config.json each time, because a running job
+    keeps the config it started with."""
+    try:
+        return bool(frappe.get_site_config().get("maintenance_mode"))
+    except Exception:
+        return False
+
+
 class _YieldToWaitingBuild(Exception):
     """Raised inside a build to pause it for a language a user is waiting on."""
 
@@ -554,10 +568,13 @@ def generate_pdf_for_single_language(lang):
     _refresh_lock(lang_code)
     snapshot_at = now_datetime()
     requeued = False
+    _skip_followup = False
     frappe.logger().info(f"Wiki PDF: Starting generation for lang={lang_code}")
 
     try:
         _get_build(lang_code)
+        if _in_maintenance():
+            raise _StopForMaintenance()
         _set_build(lang_code, status="Updating", started_at=snapshot_at)
 
         sidebar, pages, fp = _load_source(with_content=True)
@@ -642,6 +659,11 @@ def generate_pdf_for_single_language(lang):
                     must_yield = False
                 if must_yield:
                     raise _YieldToWaitingBuild()
+                # A site update waits (about 5 minutes) for background jobs to
+                # finish, then fails. Stop between pages so it can go ahead;
+                # translated pages are already cached.
+                if _in_maintenance():
+                    raise _StopForMaintenance()
                 full_number = f"{groups[-1]['number']}.{ref_counter}"
                 groups[-1]["pages"].append({
                     "number": full_number,
@@ -679,6 +701,16 @@ def generate_pdf_for_single_language(lang):
 
         _publish(lang_code, cache_fname, pdf_bin, fp, snapshot_at, stats)
 
+    except _StopForMaintenance:
+        # Not a failure: leave it Outdated so the next download, the Friday job
+        # or a manual rebuild resumes it (from the translation cache).
+        frappe.logger().info(f"Wiki PDF: lang={lang_code} stopped for site maintenance.")
+        try:
+            _set_build(lang_code, status="Outdated")
+        except Exception:
+            pass
+        _skip_followup = True
+
     except _YieldToWaitingBuild:
         # Re-queue at the back, still holding the lock, so it resumes (from the
         # translation cache) after the build the user is waiting on.
@@ -708,7 +740,8 @@ def generate_pdf_for_single_language(lang):
         try:
             if not requeued:
                 _release_lock(lang_code)
-                _run_followup_if_requested(lang_code)
+                if not _skip_followup:
+                    _run_followup_if_requested(lang_code)
         except Exception:
             frappe.logger().error(f"Wiki PDF: follow-up check failed for lang={lang_code}: {frappe.get_traceback()}")
 
