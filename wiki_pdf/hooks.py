@@ -10,8 +10,9 @@ app_license = "MIT"
 # A bundle, so every build gets a new hashed URL and browsers never keep
 # running a stale cached copy (plain /assets files are cached for 12 hours).
 web_include_js = "wiki_pdf.bundle.js"
-# Default look of all wiki page content (font, heading colour, justified text)
-web_include_css = "wiki_content.bundle.css"
+# Default look of wiki page content (font, alignment, heading and link colours),
+# set in Wiki Style Settings and added to every page's <head>.
+update_website_context = "wiki_pdf.wiki_pdf.doctype.wiki_style_settings.wiki_style_settings.update_website_context"
 
 # Edits only mark the translated PDFs as outdated; they don't start a build
 # (that happens on download, the Friday job, or an admin trigger).

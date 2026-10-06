@@ -1,0 +1,358 @@
+{
+ "actions": [],
+ "creation": "2026-10-06 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "description": "Default look of wiki page content: font, alignment, heading and link colours.",
+ "field_order": [
+  "section_general",
+  "enabled",
+  "font",
+  "custom_font",
+  "column_break_text",
+  "font_size",
+  "line_height",
+  "text_color",
+  "section_paragraphs",
+  "paragraph_align",
+  "column_break_paragraphs",
+  "paragraph_color",
+  "section_h1",
+  "h1_color",
+  "h1_align",
+  "column_break_h1",
+  "h1_font_size",
+  "h1_bold",
+  "style_page_title",
+  "section_h2",
+  "h2_color",
+  "h2_align",
+  "column_break_h2",
+  "h2_font_size",
+  "h2_bold",
+  "section_h3",
+  "h3_color",
+  "h3_align",
+  "column_break_h3",
+  "h3_font_size",
+  "h3_bold",
+  "section_h4",
+  "h4_color",
+  "h4_align",
+  "column_break_h4",
+  "h4_font_size",
+  "h4_bold",
+  "section_links",
+  "link_color",
+  "link_hover_color",
+  "link_underline",
+  "column_break_links",
+  "dark_link_color",
+  "dark_link_hover_color",
+  "section_custom",
+  "custom_css"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_general",
+   "fieldtype": "Section Break",
+   "label": "Text",
+   "description": "Applies to the content of every wiki page (not the sidebar or top bar). Leave a field empty to keep the wiki's default."
+  },
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Apply These Styles",
+   "default": "1",
+   "description": "Untick to switch all of these styles off."
+  },
+  {
+   "fieldname": "font",
+   "fieldtype": "Select",
+   "label": "Font",
+   "options": "Tahoma\nArial\nVerdana\nGeorgia\nTimes New Roman\nNoto Sans\nSite Default\nCustom",
+   "default": "Tahoma"
+  },
+  {
+   "fieldname": "custom_font",
+   "fieldtype": "Data",
+   "label": "Custom Font",
+   "depends_on": "eval:doc.font==\"Custom\"",
+   "mandatory_depends_on": "eval:doc.font==\"Custom\"",
+   "description": "A CSS font name, e.g. \"Open Sans\", sans-serif. The font must be available to the browser."
+  },
+  {
+   "fieldname": "column_break_text",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "font_size",
+   "fieldtype": "Int",
+   "label": "Text Size (px)",
+   "default": "16"
+  },
+  {
+   "fieldname": "line_height",
+   "fieldtype": "Float",
+   "label": "Line Spacing",
+   "default": "1.5",
+   "precision": "2",
+   "description": "1.5 = one and a half lines."
+  },
+  {
+   "fieldname": "text_color",
+   "fieldtype": "Color",
+   "label": "Text Colour"
+  },
+  {
+   "fieldname": "section_paragraphs",
+   "fieldtype": "Section Break",
+   "label": "Paragraphs"
+  },
+  {
+   "fieldname": "paragraph_align",
+   "fieldtype": "Select",
+   "label": "Paragraph Alignment",
+   "options": "Default\nLeft\nCenter\nRight\nJustify",
+   "default": "Justify"
+  },
+  {
+   "fieldname": "column_break_paragraphs",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "paragraph_color",
+   "fieldtype": "Color",
+   "label": "Paragraph Colour"
+  },
+  {
+   "fieldname": "section_h1",
+   "fieldtype": "Section Break",
+   "label": "Heading 1 (H1)",
+   "collapsible": 1,
+   "description": "Main headings (# in the editor)."
+  },
+  {
+   "fieldname": "h1_color",
+   "fieldtype": "Color",
+   "label": "H1 Colour"
+  },
+  {
+   "fieldname": "h1_align",
+   "fieldtype": "Select",
+   "label": "H1 Alignment",
+   "options": "Default\nLeft\nCenter\nRight",
+   "default": "Default"
+  },
+  {
+   "fieldname": "column_break_h1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "h1_font_size",
+   "fieldtype": "Int",
+   "label": "H1 Size (px)",
+   "description": "Empty = the wiki's default size."
+  },
+  {
+   "fieldname": "h1_bold",
+   "fieldtype": "Select",
+   "label": "H1 Weight",
+   "options": "Default\nNormal\nBold",
+   "default": "Default"
+  },
+  {
+   "fieldname": "style_page_title",
+   "fieldtype": "Check",
+   "label": "Also Style the Page Title",
+   "default": "0",
+   "description": "Apply the H1 settings to the title at the top of each page as well."
+  },
+  {
+   "fieldname": "section_h2",
+   "fieldtype": "Section Break",
+   "label": "Heading 2 (H2)",
+   "collapsible": 1,
+   "description": "Section headings (## in the editor)."
+  },
+  {
+   "fieldname": "h2_color",
+   "fieldtype": "Color",
+   "label": "H2 Colour",
+   "default": "#1F4E78"
+  },
+  {
+   "fieldname": "h2_align",
+   "fieldtype": "Select",
+   "label": "H2 Alignment",
+   "options": "Default\nLeft\nCenter\nRight",
+   "default": "Left"
+  },
+  {
+   "fieldname": "column_break_h2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "h2_font_size",
+   "fieldtype": "Int",
+   "label": "H2 Size (px)",
+   "description": "Empty = the wiki's default size."
+  },
+  {
+   "fieldname": "h2_bold",
+   "fieldtype": "Select",
+   "label": "H2 Weight",
+   "options": "Default\nNormal\nBold",
+   "default": "Default"
+  },
+  {
+   "fieldname": "section_h3",
+   "fieldtype": "Section Break",
+   "label": "Heading 3 (H3)",
+   "collapsible": 1,
+   "description": "Sub-section headings (###)."
+  },
+  {
+   "fieldname": "h3_color",
+   "fieldtype": "Color",
+   "label": "H3 Colour"
+  },
+  {
+   "fieldname": "h3_align",
+   "fieldtype": "Select",
+   "label": "H3 Alignment",
+   "options": "Default\nLeft\nCenter\nRight",
+   "default": "Default"
+  },
+  {
+   "fieldname": "column_break_h3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "h3_font_size",
+   "fieldtype": "Int",
+   "label": "H3 Size (px)",
+   "description": "Empty = the wiki's default size."
+  },
+  {
+   "fieldname": "h3_bold",
+   "fieldtype": "Select",
+   "label": "H3 Weight",
+   "options": "Default\nNormal\nBold",
+   "default": "Default"
+  },
+  {
+   "fieldname": "section_h4",
+   "fieldtype": "Section Break",
+   "label": "Heading 4 (H4)",
+   "collapsible": 1,
+   "description": "Small headings (####)."
+  },
+  {
+   "fieldname": "h4_color",
+   "fieldtype": "Color",
+   "label": "H4 Colour"
+  },
+  {
+   "fieldname": "h4_align",
+   "fieldtype": "Select",
+   "label": "H4 Alignment",
+   "options": "Default\nLeft\nCenter\nRight",
+   "default": "Default"
+  },
+  {
+   "fieldname": "column_break_h4",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "h4_font_size",
+   "fieldtype": "Int",
+   "label": "H4 Size (px)",
+   "description": "Empty = the wiki's default size."
+  },
+  {
+   "fieldname": "h4_bold",
+   "fieldtype": "Select",
+   "label": "H4 Weight",
+   "options": "Default\nNormal\nBold",
+   "default": "Default"
+  },
+  {
+   "fieldname": "section_links",
+   "fieldtype": "Section Break",
+   "label": "Links",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "link_color",
+   "fieldtype": "Color",
+   "label": "Link Colour",
+   "default": "#1565C0"
+  },
+  {
+   "fieldname": "link_hover_color",
+   "fieldtype": "Color",
+   "label": "Link Colour on Hover",
+   "default": "#0D47A1"
+  },
+  {
+   "fieldname": "link_underline",
+   "fieldtype": "Check",
+   "label": "Underline Links",
+   "default": "1"
+  },
+  {
+   "fieldname": "column_break_links",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "dark_link_color",
+   "fieldtype": "Color",
+   "label": "Link Colour (Dark Mode)",
+   "default": "#64B5F6"
+  },
+  {
+   "fieldname": "dark_link_hover_color",
+   "fieldtype": "Color",
+   "label": "Link Hover Colour (Dark Mode)",
+   "default": "#90CAF9"
+  },
+  {
+   "fieldname": "section_custom",
+   "fieldtype": "Section Break",
+   "label": "Advanced",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "custom_css",
+   "fieldtype": "Code",
+   "label": "Extra CSS",
+   "options": "CSS",
+   "description": "Added after the settings above, for anything they don't cover. Target page content with .wiki-content, e.g. .wiki-content table { font-size: 14px; }"
+  }
+ ],
+ "issingle": 1,
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-06 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Wiki PDF",
+ "name": "Wiki Style Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
