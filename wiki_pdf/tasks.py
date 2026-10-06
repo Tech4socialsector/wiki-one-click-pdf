@@ -298,6 +298,12 @@ def _release_lock(lang_code):
     frappe.cache().delete(_lock_key(lang_code))
 
 
+def _lock_held(lang_code):
+    # Not cache().exists(): Frappe's exists() adds the site prefix again, and
+    # _lock_key is already prefixed, so it would never find the lock.
+    return frappe.cache().get(_lock_key(lang_code)) is not None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # REQUESTING BUILDS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -317,6 +323,27 @@ def _move_to_front(job_id):
         q.enqueue_job(job, at_front=True)
     except Exception:
         frappe.logger().warning(f"Wiki PDF: could not move job {job_id} to the front: {frappe.get_traceback()}")
+
+
+def _job_alive(job_id):
+    """True if the build's RQ job is still queued or running. Unknown counts
+    as alive, so a lock is never cleared on a guess."""
+    if not job_id:
+        return False
+    try:
+        from rq.exceptions import NoSuchJobError
+        from rq.job import Job
+
+        from frappe.utils.background_jobs import get_redis_conn
+
+        try:
+            status = Job.fetch(job_id, connection=get_redis_conn()).get_status()
+        except NoSuchJobError:
+            return False
+        status = getattr(status, "value", status)
+        return status in ("queued", "started", "deferred", "scheduled")
+    except Exception:
+        return True
 
 
 def _queue_position(job_id):
@@ -410,6 +437,12 @@ def request_build(lang, force=False, priority=False):
     if priority:
         _mark_waiting(lang_code)
 
+    # A lock left behind by a killed job (stopped, timed out, worker restarted)
+    # would otherwise block new builds until it expires.
+    if _lock_held(lang_code) and not _job_alive(rec.job_id):
+        frappe.logger().info(f"Wiki PDF: lang={lang_code} clearing lock of dead job {rec.job_id}.")
+        _release_lock(lang_code)
+
     if _try_lock(lang_code):
         try:
             job = _enqueue_build(lang_code, at_front=priority)
@@ -437,7 +470,7 @@ def get_pdf_state(lang):
     rec = _get_build(lang_code)
     has_pdf = bool(rec.file_url) and _pdf_exists(lang_code)
 
-    building = rec.status in ("Queued", "Updating") and frappe.cache().exists(_lock_key(lang_code))
+    building = rec.status in ("Queued", "Updating") and _lock_held(lang_code)
     if result == "current":
         status = "Up to Date"
     elif building:
