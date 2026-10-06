@@ -698,6 +698,9 @@ h2 { font-size: 16pt; color: #222; margin-top: 14pt; margin-bottom: 6pt; page-br
 h3 { font-size: 14pt; color: #222; margin-top: 12pt; margin-bottom: 4pt; page-break-after: avoid !important; }
 h4 { font-size: 12pt; color: #222; margin-top: 10pt; margin-bottom: 4pt; page-break-after: avoid !important; }
 p { margin: 4pt 0; }
+/* Body text is justified; short table-cell text reads better left-aligned. */
+p, li { text-align: justify; }
+th p, td p, th li, td li { text-align: left; }
 img { max-width: 100%; height: auto; display: block; margin: 8pt 0; }
 table { width: 100%; border-collapse: collapse; margin: 8pt 0; table-layout: fixed; font-size: 10pt; page-break-inside: auto; }
 thead { display: table-header-group !important; }

@@ -722,7 +722,10 @@ def generate_pdf_for_single_language(lang):
                 if _cache_hit(cached, p, source_hash, lang_code):
                     cached["source_hash"] = source_hash  # upgrades legacy entries in place
                     translated_title = cached["title"]
-                    cleaned_content = cached["content_html"]
+                    # Clean up on every build (not only when translating), so PDF
+                    # layout fixes reach cached pages too. Safe on entries that
+                    # were already cleaned: the clean-up is idempotent.
+                    cleaned_content = _clean_for_pdf(cached["content_html"])
                     stats["reused"] += 1
                 else:
                     page_started = time.time()
@@ -739,7 +742,7 @@ def generate_pdf_for_single_language(lang):
                         stats["failed"] += 1
                         if cached and cached.get("content_html"):
                             translated_title = cached["title"]
-                            cleaned_content = cached["content_html"]
+                            cleaned_content = _clean_for_pdf(cached["content_html"])
                         else:
                             # No translation at all: this page would be (partly) English.
                             stats["untranslated"] += 1
@@ -750,7 +753,8 @@ def generate_pdf_for_single_language(lang):
                             "modified": str(p.modified),
                             "translator": translator_id,
                             "title": translated_title,
-                            "content_html": cleaned_content,
+                            # The translation itself; PDF clean-up runs at build time.
+                            "content_html": translated_html,
                         }
                         stats["translated"] += 1
                         # Save as we go: if the job is killed (timeout, deploy,
