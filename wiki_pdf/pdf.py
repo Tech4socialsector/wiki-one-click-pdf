@@ -84,6 +84,18 @@ class TranslationError(Exception):
     """A batch could not be translated after all retries."""
 
 
+def _reraise_if_job_timeout(e):
+    """Background jobs are stopped by RQ raising JobTimeoutException inside
+    them. Translation code catches errors broadly, so let that one through:
+    otherwise a timed-out build keeps going as if a page had just failed."""
+    try:
+        from rq.timeouts import JobTimeoutException
+    except ImportError:
+        return
+    if isinstance(e, JobTimeoutException):
+        raise e
+
+
 class Translator:
     """Interface every translation provider implements."""
 
@@ -164,7 +176,13 @@ def _parse_batch_response(raw, expected_len):
     translated, _ = json.JSONDecoder().raw_decode(result, start)
     if isinstance(translated, list) and len(translated) == expected_len:
         return [str(t) for t in translated]
-    raise ValueError(f"Count mismatch: expected {expected_len}, got {len(translated)}")
+    got = len(translated) if isinstance(translated, list) else "not a list"
+    raise _CountMismatch(f"Count mismatch: expected {expected_len}, got {got}")
+
+
+class _CountMismatch(ValueError):
+    """The model returned a different number of items than it was given
+    (e.g. it merged two texts). Retrying the same prompt tends to repeat it."""
 
 
 class _LLMTranslator(Translator):
@@ -184,7 +202,20 @@ class _LLMTranslator(Translator):
             try:
                 raw = self._call(prompt)
                 return _parse_batch_response(raw, len(texts))
+            except _CountMismatch as e:
+                # Split the batch and translate each half: smaller batches stop
+                # the model merging items, and this ends at single texts.
+                if len(texts) > 1:
+                    mid = len(texts) // 2
+                    return self.translate_batch(texts[:mid], target_lang) + self.translate_batch(
+                        texts[mid:], target_lang
+                    )
+                if attempt == 2:
+                    raise TranslationError(
+                        f"{self.__class__.__name__} batch translation failed (lang={target_lang}): {e}"
+                    ) from e
             except Exception as e:
+                _reraise_if_job_timeout(e)
                 if attempt < 2:
                     # Rate limits (HTTP 429) need a longer pause than other errors.
                     backoff = 20 if "429" in str(e) else 2
@@ -379,6 +410,7 @@ def translate_text(text, lang="en", stats=None):
         _validate_script(translated, lang_code)
         return translated
     except Exception as e:
+        _reraise_if_job_timeout(e)
         _record_failure(stats, lang_code, 1, e)
         return text
 
@@ -448,6 +480,7 @@ def translate_html(html_content, lang="en", stats=None):
 
         for (batch_nodes, batch_texts), translated in zip(batches, results):
             if isinstance(translated, Exception):
+                _reraise_if_job_timeout(translated)
                 # Keep this batch's original text; the caller decides what to do.
                 _record_failure(stats, lang_code, len(batch_texts), translated)
                 continue
@@ -458,6 +491,7 @@ def translate_html(html_content, lang="en", stats=None):
         return str(soup)
 
     except Exception as e:
+        _reraise_if_job_timeout(e)
         _record_failure(stats, lang_code, 0, f"translate_html failed (lang={lang_code}): {e}")
         return html_content
 

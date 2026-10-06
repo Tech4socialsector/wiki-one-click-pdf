@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": ["../../../../../../../../tmp/tmp-91404-2JmP5mK6ciLh/wiki_pdf/wiki_pdf/public/css/wiki_content.bundle.css"],
-  "sourcesContent": ["/*\n * Default style for all wiki page content (existing and new pages), so\n * authors don't need to paste inline styles into each page:\n * Tahoma 16px / 1.5, dark-blue left-aligned section headings, justified\n * paragraphs.\n *\n * .wiki-content     - a published page\n * .markdown-preview - the editor's live preview\n * .preview-content  - the \"review changes\" preview of a pending patch\n */\n.wiki-content,\n.markdown-preview,\n.preview-content {\n\tfont-family: Tahoma, sans-serif;\n\tfont-size: 16px;\n\tline-height: 1.5;\n}\n\n.wiki-content h2,\n.markdown-preview h2,\n.preview-content h2 {\n\tfont-family: Tahoma, sans-serif !important;\n\tcolor: #1f4e78 !important;\n\ttext-align: right !important;\n}\n\n.wiki-content p,\n.markdown-preview p,\n.preview-content p {\n\ttext-align: justify;\n}\n"],
-  "mappings": "AAUA,iDAGC,8BACA,eACA,gBAGD,0DAGC,wCACA,wBACA,2BAGD,uDAGC",
-  "names": []
-}
