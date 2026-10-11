@@ -172,8 +172,13 @@ def _parse_batch_response(raw, expected_len):
     # the first JSON value and ignore trailing text instead of failing.
     start = result.find("[")
     if start == -1:
-        raise ValueError("No JSON array in response")
-    translated, _ = json.JSONDecoder().raw_decode(result, start)
+        raise _CountMismatch("No JSON array in response")
+    try:
+        translated, _ = json.JSONDecoder().raw_decode(result, start)
+    except ValueError as e:
+        # Malformed or cut-off JSON (e.g. an unescaped quote): like a count
+        # mismatch, a smaller batch usually comes back clean.
+        raise _CountMismatch(f"Invalid JSON in response: {e}") from e
     if isinstance(translated, list) and len(translated) == expected_len:
         return [str(t) for t in translated]
     got = len(translated) if isinstance(translated, list) else "not a list"
@@ -181,8 +186,9 @@ def _parse_batch_response(raw, expected_len):
 
 
 class _CountMismatch(ValueError):
-    """The model returned a different number of items than it was given
-    (e.g. it merged two texts). Retrying the same prompt tends to repeat it."""
+    """The model's answer can't be used as-is: a different number of items
+    than it was given (e.g. it merged two texts), or invalid JSON. Retrying
+    the same prompt tends to repeat it, so the batch is split instead."""
 
 
 class _LLMTranslator(Translator):
