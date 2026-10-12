@@ -91,35 +91,25 @@ function setup_wiki_pdf_download() {
     }
 
     // "Waiting in queue (#3)... 0:42" / "Updating PDF (ta)... 1:20"
-    // "~20 min left", counting down between server checks.
-    function time_left(progress, received_at) {
-        if (!progress) return '';
-        var secs = progress.eta_seconds - (Date.now() - (received_at || Date.now())) / 1000;
-        if (secs < 60) return 'less than a minute left';
-        var mins = Math.round(secs / 60);
-        if (mins < 60) return '~' + mins + ' min left';
-        return '~' + Math.floor(mins / 60) + ' h ' + (mins % 60) + ' min left';
-    }
-
-    // "Progress: 45 / 79 pages · ~20 min left" / "Waiting in queue (#2)"
+    // "Progress: 45 / 79 pages" / "Waiting in queue (#2)"
     function progress_text(state, received_at) {
         if (state.status === 'Queued') {
             return state.queue_position > 1 ? 'Waiting in queue (#' + state.queue_position + ')' : 'Starting soon';
         }
         var p = state.progress;
         if (!p) return null;
-        if (p.phase === 'rendering') return 'Creating the PDF &middot; ' + time_left(p, received_at);
-        return p.done + ' / ' + p.total + ' pages &middot; ' + time_left(p, received_at);
+        if (p.phase === 'rendering') return 'Creating the PDF';
+        return p.done + ' / ' + p.total + ' pages';
     }
 
-    // Button: "Updating PDF (ta) 45/79 · ~20 min left" / "Waiting in queue (#3)... 0:42"
+    // Button: "Updating PDF (ta) 45/79" / "Waiting in queue (#3)... 0:42"
     function render_wait(lang, started_at) {
         var s = wait_state || {};
         var p = s.status === 'Updating' ? s.progress : null;
         if (p && p.phase === 'rendering') {
-            set_busy('Creating PDF (' + lang + ') \u00b7 ' + time_left(p, s.received_at));
+            set_busy('Creating PDF (' + lang + ')...');
         } else if (p) {
-            set_busy('Updating PDF (' + lang + ') ' + p.done + '/' + p.total + ' \u00b7 ' + time_left(p, s.received_at));
+            set_busy('Updating PDF (' + lang + ') ' + p.done + '/' + p.total);
         } else if (s.status === 'Queued') {
             var label = s.queue_position > 1
                 ? 'Waiting in queue (#' + s.queue_position + ')'
