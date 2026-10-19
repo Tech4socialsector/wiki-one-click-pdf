@@ -14,7 +14,8 @@ DOCTYPE = "Wiki Style Settings"
 CSS_CACHE_KEY = "wiki_style_settings_head"
 
 # Page content: published page, editor live preview, "review changes" preview.
-CONTENT = (".wiki-content", ".markdown-preview", ".preview-content")
+# Wiki 3 (Frappe 16): the page body is #wiki-content.
+CONTENT = (".wiki-content", ".markdown-preview", ".preview-content", "#wiki-content")
 
 FONT_STACKS = {
     "Tahoma": "Tahoma, sans-serif",
@@ -150,7 +151,7 @@ def build_css(s):
     for n in (1, 2, 3, 4):
         selectors = within(f" h{n}")
         if n == 1 and s.style_page_title:
-            selectors.append(".wiki-title")
+            selectors += [".wiki-title", "#wiki-page-title"]  # Wiki 2 / Wiki 3 page title
         hcolor = _color(s.get(f"h{n}_color"))
         halign = _align(s.get(f"h{n}_align"))
         size = s.get(f"h{n}_font_size")
@@ -172,11 +173,13 @@ def build_css(s):
     ])
     if _color(s.link_hover_color):
         rule(hover, [f"color: {_color(s.link_hover_color)} !important;"])
-    # The wiki's dark mode puts a "dark" class on <body>.
+    # Dark mode: Wiki 2 puts a "dark" class on <body>; Wiki 3 sets html[data-theme="dark"].
     if _color(s.dark_link_color):
-        rule(within(" a:not(.btn)", "body.dark "), [f"color: {_color(s.dark_link_color)} !important;"])
+        rule(within(" a:not(.btn)", "body.dark ") + within(" a:not(.btn)", 'html[data-theme="dark"] '),
+             [f"color: {_color(s.dark_link_color)} !important;"])
     if _color(s.dark_link_hover_color):
-        rule(within(" a:not(.btn):hover", "body.dark "), [f"color: {_color(s.dark_link_hover_color)} !important;"])
+        rule(within(" a:not(.btn):hover", "body.dark ") + within(" a:not(.btn):hover", 'html[data-theme="dark"] '),
+             [f"color: {_color(s.dark_link_hover_color)} !important;"])
 
     if s.custom_css:
         # Keep it inside the <style> tag no matter what was typed.

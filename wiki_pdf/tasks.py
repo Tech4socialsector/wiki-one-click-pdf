@@ -146,7 +146,19 @@ def resolve_lang(lang):
 # SOURCE CONTENT + FINGERPRINT
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _is_wiki_v3():
+    """True on Wiki 3 (Frappe 16), where content lives in the "Wiki Document"
+    tree; Wiki 2 uses "Wiki Page" + the "Wiki Group Item" sidebar."""
+    if not hasattr(frappe.local, "wiki_pdf_is_v3"):
+        frappe.local.wiki_pdf_is_v3 = bool(frappe.db.exists("DocType", "Wiki Document"))
+    return frappe.local.wiki_pdf_is_v3
+
+
 def _load_sidebar():
+    """The guide's page order as rows of {wiki_page, parent_label}, where
+    parent_label is the section (sidebar group) a page is shown under."""
+    if _is_wiki_v3():
+        return _load_sidebar_v3()
     sidebar_parents = frappe.get_all("Wiki Group Item", fields=["parent"], limit=1)
     if not sidebar_parents:
         return []
@@ -160,12 +172,73 @@ def _load_sidebar():
     )
 
 
+def _guide_space_v3():
+    """The Wiki Space the PDF is built from: site config wiki_pdf_space if
+    set, else the first published space that has content."""
+    configured = frappe.conf.get("wiki_pdf_space")
+    if configured:
+        return frappe.db.get_value("Wiki Space", configured, ["name", "root_group"], as_dict=True)
+    spaces = frappe.get_all(
+        "Wiki Space",
+        filters={"root_group": ["is", "set"]},
+        fields=["name", "root_group", "is_published"],
+        order_by="is_published desc, switcher_order asc, creation asc",
+        ignore_permissions=True,
+        limit=1,
+    )
+    return spaces[0] if spaces else None
+
+
+def _load_sidebar_v3():
+    """Walks the space's Wiki Document tree in sidebar order (sort_order at
+    each level). Top-level groups become the PDF's sections; pages in deeper
+    groups are listed under their top-level section. Unpublished pages and
+    groups (with everything in them) and external links are left out."""
+    space = _guide_space_v3()
+    if not space or not space.root_group:
+        return []
+    root = frappe.db.get_value("Wiki Document", space.root_group, ["lft", "rgt"], as_dict=True)
+    if not root:
+        return []
+    nodes = frappe.db.sql(
+        """
+        SELECT name, title, is_group, is_published, is_external_link,
+               parent_wiki_document, sort_order, lft
+        FROM `tabWiki Document`
+        WHERE lft > %(lft)s AND rgt < %(rgt)s
+        """,
+        {"lft": root.lft, "rgt": root.rgt},
+        as_dict=True,
+    )
+    children = {}
+    for n in nodes:
+        children.setdefault(n.parent_wiki_document, []).append(n)
+    for kids in children.values():
+        kids.sort(key=lambda n: (n.sort_order or 0, n.lft))
+
+    rows = []
+
+    def walk(parent, label):
+        for n in children.get(parent, []):
+            if not n.is_published or n.is_external_link:
+                continue
+            if n.is_group:
+                # The section label is the top-level group's title.
+                walk(n.name, n.title if parent == space.root_group else label)
+            else:
+                rows.append(frappe._dict(wiki_page=n.name, parent_label=label))
+
+    walk(space.root_group, "")
+    return rows
+
+
 def _load_source(with_content=False):
     """Returns (sidebar, pages_by_name, fingerprint). Content hashes are
     computed by the database in the same SELECT as the content, so the
     fingerprint always describes exactly the content that was read."""
     sidebar = _load_sidebar()
     names = tuple({s.wiki_page for s in sidebar if s.wiki_page})
+    table = "tabWiki Document" if _is_wiki_v3() else "tabWiki Page"
     pages = {}
     if names:
         content_col = ", content" if with_content else ""
@@ -173,7 +246,7 @@ def _load_source(with_content=False):
             f"""
             SELECT name, title, modified,
                    LOWER(SHA2(COALESCE(content, ''), 256)) AS content_sha{content_col}
-            FROM `tabWiki Page`
+            FROM `{table}`
             WHERE name IN %(names)s
             """,
             {"names": names},
@@ -629,6 +702,28 @@ def _cache_hit(cached, page, source_hash, lang_code):
     return cached.get("modified") == str(page.modified) and not _looks_untranslated(cached, lang_code)
 
 
+def _index_by_source_hash(cache):
+    """{source_hash: entry} for cache entries written by this code."""
+    return {
+        v["source_hash"]: v
+        for k, v in cache.items()
+        if k != LABELS_CACHE_KEY and isinstance(v, dict) and v.get("source_hash")
+    }
+
+
+def _cached_entry(cache, by_source_hash, page, source_hash):
+    """The cached translation for a page: by page name, else any entry with
+    the same title + content. The fallback keeps translations when a page
+    is renamed/moved, and when Wiki 3's migration gives every page a new
+    name (Wiki Page -> Wiki Document) with the same content, so the guide
+    isn't paid for again in every language."""
+    entry = cache.get(page.name)
+    if entry is not None:
+        return entry
+    match = by_source_hash.get(source_hash)
+    return dict(match) if match else None
+
+
 def _translator_id():
     provider = (frappe.conf.get("wiki_pdf_translation_provider") or "google").lower()
     return f"{provider}:{frappe.conf.get(f'{provider}_model') or 'default'}"
@@ -685,6 +780,7 @@ def generate_pdf_for_single_language(lang):
             raise Exception("No wiki pages found in the sidebar.")
 
         translation_cache = _load_translation_cache(lang_code)
+        by_source_hash = _index_by_source_hash(translation_cache)
         labels_cache = translation_cache.setdefault(LABELS_CACHE_KEY, {})
         translator_id = _translator_id() if lang_code != "en" else "none"
         stats = {"translated": 0, "reused": 0, "failed": 0, "untranslated": 0, "failed_labels": 0}
@@ -696,7 +792,10 @@ def generate_pdf_for_single_language(lang):
             "done": 0,
             "to_translate": sum(
                 1 for p in page_rows
-                if not _cache_hit(translation_cache.get(p.name), p, _page_source_hash(p), lang_code)
+                if not _cache_hit(
+                    _cached_entry(translation_cache, by_source_hash, p, _page_source_hash(p)),
+                    p, _page_source_hash(p), lang_code,
+                )
             ),
             "translated": 0,
             "translate_seconds": 0.0,
@@ -727,7 +826,9 @@ def generate_pdf_for_single_language(lang):
                     ref_counter = 1
 
                 source_hash = _page_source_hash(p)
-                cached = translation_cache.get(p.name)
+                cached = _cached_entry(translation_cache, by_source_hash, p, source_hash)
+                if cached is not None and p.name not in translation_cache:
+                    translation_cache[p.name] = cached  # reused from a moved/migrated page
                 if _cache_hit(cached, p, source_hash, lang_code):
                     cached["source_hash"] = source_hash  # upgrades legacy entries in place
                     translated_title = cached["title"]

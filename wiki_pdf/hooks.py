@@ -14,6 +14,11 @@ web_include_js = "wiki_pdf.bundle.js"
 # set in Wiki Style Settings and added to every page's <head>.
 update_website_context = "wiki_pdf.wiki_pdf.doctype.wiki_style_settings.wiki_style_settings.update_website_context"
 
+# Wiki 3 (Frappe 16) renders pages with its own layout, which loads neither
+# web_include_js nor the website context above; this adds the Download PDF
+# button script and the style settings to those pages instead.
+after_request = ["wiki_pdf.web.add_assets_to_wiki_pages"]
+
 # Edits only mark the translated PDFs as outdated; they don't start a build
 # (that happens on download, the Friday job, or an admin trigger).
 doc_events = {
@@ -22,6 +27,16 @@ doc_events = {
         "on_trash": "wiki_pdf.tasks.on_wiki_content_change",
     },
     "Wiki Space": {
+        "on_update": "wiki_pdf.tasks.on_wiki_content_change",
+    },
+    # Wiki 3: pages are "Wiki Document"s. Approved edits often update their
+    # content with a direct db write (no on_update), then save the change
+    # request, so that save is watched too.
+    "Wiki Document": {
+        "on_update": "wiki_pdf.tasks.on_wiki_content_change",
+        "on_trash": "wiki_pdf.tasks.on_wiki_content_change",
+    },
+    "Wiki Change Request": {
         "on_update": "wiki_pdf.tasks.on_wiki_content_change",
     },
 }
