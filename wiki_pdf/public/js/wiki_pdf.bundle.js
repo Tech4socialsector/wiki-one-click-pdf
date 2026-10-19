@@ -90,14 +90,25 @@
             return;
         }
 
-        // Wiki 3 (Frappe 16): desktop header nav + mobile header
+        // Wiki 3 (Frappe 16). The desktop header differs between Wiki 3
+        // releases (with or without a <nav>), but always has the theme toggle,
+        // so the button goes just before it (and before the search button
+        // next to it). The mobile header (hidden on desktop) is skipped here.
         if (!document.getElementById('wiki-content')) return;
-        var nav = document.querySelector('header nav');
-        if (nav) {
-            nav.insertBefore(make_button(
+        var toggles = document.querySelectorAll(
+            'header button[title="Toggle theme"], header button[aria-label="Toggle theme"]'
+        );
+        for (var i = 0; i < toggles.length; i++) {
+            var toggle = toggles[i];
+            if (toggle.closest('[data-testid="mobile-header"], .lg\\:hidden')) continue;
+            var before = toggle;
+            var prev = toggle.previousElementSibling;
+            if (prev && prev.tagName === 'BUTTON' && prev.querySelector('kbd')) before = prev;  // search
+            before.parentNode.insertBefore(make_button(
                 'px-1 py-1.5 text-sm-medium text-[var(--ink-gray-5)] hover:text-[var(--ink-gray-9)] rounded-5 transition-colors duration-200',
-                'cursor:pointer;white-space:nowrap;'
-            ), nav.firstChild);
+                'cursor:pointer;white-space:nowrap;font-weight:500;'
+            ), before);
+            break;
         }
         var mobile_toggle = document.querySelector('[data-testid="mobile-theme-toggle"]');
         if (mobile_toggle && mobile_toggle.parentNode) {
