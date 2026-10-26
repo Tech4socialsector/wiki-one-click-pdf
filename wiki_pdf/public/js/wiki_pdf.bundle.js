@@ -473,38 +473,172 @@
 })();
 
 // "Page X of N" next to "last updated" on each wiki page, numbered in sidebar
-// order. Wiki 2 only: Wiki 3's layout has no .wiki-page-meta, so this does nothing there.
+// order.
+// - Wiki 2: added once to .wiki-page-meta.
+// - Wiki 3: added inside #wiki-last-updated. Wiki 3 changes pages without a
+//   reload and rewrites that element's text each time, so it is watched and
+//   the number put back.
 (function () {
-    function add_page_number() {
+    function current_route() {
+        var store = window.Alpine && Alpine.store && Alpine.store('navigation');
+        if (store && store.currentRoute) return String(store.currentRoute).replace(/^\/+|\/+$/g, '');
+        return decodeURIComponent(window.location.pathname).replace(/^\/+|\/+$/g, '');
+    }
+
+    function index_of(routes, route) {
+        for (var i = 0; i < routes.length; i++) {
+            if (routes[i] === route) return i;
+        }
+        return -1;
+    }
+
+    function make_label(tag, index, total) {
+        var label = document.createElement(tag);
+        label.className = 'wiki-page-number';
+        label.textContent = 'Page ' + (index + 1) + ' of ' + total;
+        return label;
+    }
+
+    function wiki2() {
         var meta = document.querySelector('.wiki-page-meta');
         // The sidebar is rendered twice (desktop and mobile); use the first.
         var sidebar = document.querySelector('.web-sidebar');
         if (!meta || !sidebar || meta.querySelector('.wiki-page-number')) return;
 
-        var pages = sidebar.querySelectorAll('.sidebar-item[data-type="Wiki Page"]');
         // Match on the URL: the server-rendered "sidebar-item-active" class
         // comes from a cached sidebar and can point at the wrong page.
-        var route = decodeURIComponent(window.location.pathname).replace(/^\/+|\/+$/g, '');
-        var index = -1;
-        for (var i = 0; i < pages.length; i++) {
-            if (pages[i].getAttribute('data-route') === route) {
-                index = i;
-                break;
-            }
-        }
+        var routes = Array.prototype.map.call(
+            sidebar.querySelectorAll('.sidebar-item[data-type="Wiki Page"]'),
+            function (el) { return el.getAttribute('data-route'); }
+        );
+        var index = index_of(routes, current_route());
         if (index < 0) return;
 
-        var label = document.createElement('span');
-        label.className = 'wiki-page-number text-muted';
+        var label = make_label('span', index, routes.length);
+        label.classList.add('text-muted');
         label.style.marginRight = '1rem';
-        label.textContent = 'Page ' + (index + 1) + ' of ' + pages.length;
         meta.insertBefore(label, meta.firstChild);
+    }
+
+    function wiki3_routes() {
+        // The desktop and mobile sidebars both list every page; use the first.
+        var first = document.querySelector('a.wiki-link[data-route]');
+        var nav = first && first.closest('nav');
+        if (!nav) return [];
+        var routes = [];
+        nav.querySelectorAll('a.wiki-link[data-route]').forEach(function (a) {
+            var route = a.getAttribute('data-route');
+            if (index_of(routes, route) < 0) routes.push(route);
+        });
+        return routes;
+    }
+
+    function wiki3() {
+        var updated = document.getElementById('wiki-last-updated');
+        if (!updated) return;
+
+        function refresh() {
+            var routes = wiki3_routes();
+            var index = index_of(routes, current_route());
+            var label = updated.querySelector('.wiki-page-number');
+            if (index < 0) {
+                if (label) label.remove();
+                return;
+            }
+            var text = 'Page ' + (index + 1) + ' of ' + routes.length;
+            if (label && label.textContent === text) return;
+            if (label) label.remove();
+            label = make_label('span', index, routes.length);
+            label.style.marginRight = '0.75rem';
+            label.style.paddingRight = '0.75rem';
+            label.style.borderRight = '1px solid currentColor';
+            updated.insertBefore(label, updated.firstChild);
+        }
+
+        refresh();
+        new MutationObserver(refresh).observe(updated, { childList: true });
+        // Back/forward buttons also change the page.
+        window.addEventListener('popstate', function () { setTimeout(refresh, 300); });
+    }
+
+    function add_page_number() {
+        if (document.getElementById('wiki-last-updated')) wiki3();
+        else wiki2();
     }
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', add_page_number);
     } else {
         add_page_number();
+    }
+})();
+
+// Image alignment on Wiki 3 pages. The Wiki 3 editor saves images as markdown
+// and drops any styles, so the "Image settings" button in the editor
+// (wiki_pdf_editor.bundle.js) stores the layout in the image title instead,
+// e.g. ![photo](/files/a.png "align=wrap-left width=300px"). Here the title is
+// turned into styles. pdf.py does the same for the PDF.
+(function () {
+    var ALIGN = /(?:^|\s)align=(left|center|right|wrap-left|wrap-right)(?=\s|$)/;
+    var WIDTH = /(?:^|\s)width=(\d+(?:\.\d+)?(?:px|%))(?=\s|$)/;
+
+    function layout_css(align, width) {
+        var styles = [];
+        if (align === 'wrap-left') styles.push('float:left', 'margin:0.3em 1.2em 0.8em 0');
+        else if (align === 'wrap-right') styles.push('float:right', 'margin:0.3em 0 0.8em 1.2em');
+        else if (align === 'left') styles.push('display:block', 'margin:1em auto 1em 0');
+        else if (align === 'center') styles.push('display:block', 'margin:1em auto');
+        else if (align === 'right') styles.push('display:block', 'margin:1em 0 1em auto');
+
+        if (width) styles.push('width:' + width);
+        else if (align === 'wrap-left' || align === 'wrap-right') styles.push('width:40%');
+        styles.push('max-width:100%', 'height:auto');
+        return styles.join(';');
+    }
+
+    function next_block(el) {
+        var next = el.nextElementSibling;
+        while (next && next.tagName === 'BR') next = next.nextElementSibling;
+        return next;
+    }
+
+    function apply_layouts(root) {
+        root.querySelectorAll('img[title]').forEach(function (img) {
+            var title = img.getAttribute('title') || '';
+            var align = (title.match(ALIGN) || [])[1] || '';
+            var width = (title.match(WIDTH) || [])[1] || '';
+            if (!align && !width) return;
+
+            img.setAttribute('style', layout_css(align, width));
+            var rest = title.replace(/(?:^|\s)(align|width)=\S+/g, '').trim();
+            if (rest) img.setAttribute('title', rest);
+            else img.removeAttribute('title');
+
+            // Wrapping stops after the paragraph that follows the image.
+            if (align === 'wrap-left' || align === 'wrap-right') {
+                var block = img.parentElement && img.parentElement.tagName === 'P' ? img.parentElement : img;
+                // Wiki 3 puts an image on its own line (any text beside it is
+                // its caption), so the paragraph after it is the one that wraps.
+                var wrapped = next_block(block);
+                var after = wrapped && next_block(wrapped);
+                if (after) after.style.clear = 'both';
+            }
+        });
+    }
+
+    function init() {
+        var content = document.getElementById('wiki-content');
+        if (!content) return;
+        apply_layouts(content);
+        // Wiki 3 swaps the page content in place when you move between pages.
+        new MutationObserver(function () { apply_layouts(content); })
+            .observe(content, { childList: true });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
     }
 })();
 

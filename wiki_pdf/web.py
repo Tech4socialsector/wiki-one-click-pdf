@@ -6,6 +6,9 @@ templates/wiki/layout.html), which loads neither `web_include_js` nor the
 website context that `update_website_context` fills in, so on Wiki 3 the
 assets are added to the HTML response instead. Wiki 2 pages still get them
 the old way and are left untouched here.
+
+The Wiki 3 editor (a separate Vue app) gets the image settings button the
+same way.
 """
 
 import frappe
@@ -14,6 +17,8 @@ import frappe
 MARKER = "<!-- wiki_pdf assets -->"
 # Only Wiki 3's page layout has this; Wiki 2 uses class="wiki-content".
 WIKI3_CONTENT = 'id="wiki-content"'
+# Wiki 3's editor is a separate Vue app loaded from here.
+WIKI3_EDITOR = "/assets/wiki/frontend/"
 
 
 def add_assets_to_wiki_pages(response=None, request=None):
@@ -24,9 +29,15 @@ def add_assets_to_wiki_pages(response=None, request=None):
         if not (response.mimetype or "").startswith("text/html"):
             return
         body = response.get_data(as_text=True)
-        if WIKI3_CONTENT not in body or MARKER in body or "</head>" not in body:
+        if MARKER in body or "</head>" not in body:
             return
-        response.set_data(body.replace("</head>", _assets_html() + "</head>", 1))
+        if WIKI3_CONTENT in body:
+            assets = _assets_html()
+        elif WIKI3_EDITOR in body:
+            assets = _editor_assets_html()
+        else:
+            return
+        response.set_data(body.replace("</head>", assets + "</head>", 1))
     except Exception:
         frappe.logger().error(f"Wiki PDF: could not add assets to a wiki page: {frappe.get_traceback()}")
 
@@ -38,3 +49,11 @@ def _assets_html():
 
     script = f'<script defer src="{bundled_asset("wiki_pdf.bundle.js")}"></script>'
     return f"{MARKER}{get_head_html()}\n{script}\n"
+
+
+def _editor_assets_html():
+    """The image settings button for the Wiki 3 editor."""
+    from frappe.utils.jinja_globals import bundled_asset
+
+    script = f'<script defer src="{bundled_asset("wiki_pdf_editor.bundle.js")}"></script>'
+    return f"{MARKER}\n{script}\n"

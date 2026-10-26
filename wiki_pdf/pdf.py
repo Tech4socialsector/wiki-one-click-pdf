@@ -593,7 +593,75 @@ def _inline_images(html):
         except Exception as e:
             frappe.log_error(title="Wiki PDF Image Error", message=f"Image resolution error for {src}: {str(e)}")
             img["src"] = fallback
+    _apply_image_layouts(soup)
     return str(soup)
+
+
+_LAYOUT_ALIGN = re.compile(r"(?:^|\s)align=(left|center|right|wrap-left|wrap-right)(?=\s|$)")
+_LAYOUT_WIDTH = re.compile(r"(?:^|\s)width=(\d+(?:\.\d+)?(?:px|%))(?=\s|$)")
+_LAYOUT_TOKEN = re.compile(r"(?:^|\s)(?:align|width)=\S+")
+
+
+def _image_layout_css(align, width):
+    styles = []
+    if align == "wrap-left":
+        styles += ["float:left", "margin:0.3em 1.2em 0.8em 0"]
+    elif align == "wrap-right":
+        styles += ["float:right", "margin:0.3em 0 0.8em 1.2em"]
+    elif align == "left":
+        styles += ["display:block", "margin:1em auto 1em 0"]
+    elif align == "center":
+        styles += ["display:block", "margin:1em auto"]
+    elif align == "right":
+        styles += ["display:block", "margin:1em 0 1em auto"]
+
+    if width:
+        styles.append(f"width:{width}")
+    elif align in ("wrap-left", "wrap-right"):
+        styles.append("width:40%")
+    styles += ["max-width:100%", "height:auto"]
+    return ";".join(styles)
+
+
+def _next_block(tag):
+    nxt = tag.find_next_sibling()
+    while nxt is not None and nxt.name == "br":
+        nxt = nxt.find_next_sibling()
+    return nxt
+
+
+def _apply_image_layouts(soup):
+    """Image alignment set with the Wiki 3 editor's "Image settings" button.
+
+    The editor saves images as markdown and drops styles, so the layout is
+    kept in the image title, e.g. ![photo](/files/a.png "align=wrap-left
+    width=300px"). Turn it into inline styles (which override the PDF's
+    centred-image default), the same way wiki_pdf.bundle.js does on the page."""
+    for img in soup.find_all("img", title=True):
+        title = img.get("title") or ""
+        align = _LAYOUT_ALIGN.search(title)
+        width = _LAYOUT_WIDTH.search(title)
+        if not align and not width:
+            continue
+        align = align.group(1) if align else ""
+        img["style"] = _image_layout_css(align, width.group(1) if width else "")
+
+        rest = _LAYOUT_TOKEN.sub("", title).strip()
+        if rest:
+            img["title"] = rest
+        else:
+            del img["title"]
+
+        # Wrapping stops after the paragraph that follows the image.
+        if align in ("wrap-left", "wrap-right"):
+            parent = img.parent
+            block = parent if parent is not None and parent.name == "p" else img
+            # Wiki 3 puts an image on its own line (any text beside it is its
+            # caption), so the paragraph after it is the one that wraps.
+            wrapped = _next_block(block)
+            after = _next_block(wrapped) if wrapped is not None else None
+            if after is not None:
+                after["style"] = (after.get("style", "").rstrip("; ") + ";clear:both").lstrip(";")
 
 
 def _fit_widths(fragment):
