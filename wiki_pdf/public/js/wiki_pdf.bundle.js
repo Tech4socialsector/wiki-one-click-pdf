@@ -471,3 +471,252 @@
         if (!buttons.length) setTimeout(add_buttons, 600);
     });
 })();
+
+// "Page X of N" next to "last updated" on each wiki page, numbered in sidebar
+// order. Wiki 2 only: Wiki 3's layout has no .wiki-page-meta, so this does nothing there.
+(function () {
+    function add_page_number() {
+        var meta = document.querySelector('.wiki-page-meta');
+        // The sidebar is rendered twice (desktop and mobile); use the first.
+        var sidebar = document.querySelector('.web-sidebar');
+        if (!meta || !sidebar || meta.querySelector('.wiki-page-number')) return;
+
+        var pages = sidebar.querySelectorAll('.sidebar-item[data-type="Wiki Page"]');
+        // Match on the URL: the server-rendered "sidebar-item-active" class
+        // comes from a cached sidebar and can point at the wrong page.
+        var route = decodeURIComponent(window.location.pathname).replace(/^\/+|\/+$/g, '');
+        var index = -1;
+        for (var i = 0; i < pages.length; i++) {
+            if (pages[i].getAttribute('data-route') === route) {
+                index = i;
+                break;
+            }
+        }
+        if (index < 0) return;
+
+        var label = document.createElement('span');
+        label.className = 'wiki-page-number text-muted';
+        label.style.marginRight = '1rem';
+        label.textContent = 'Page ' + (index + 1) + ' of ' + pages.length;
+        meta.insertBefore(label, meta.firstChild);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', add_page_number);
+    } else {
+        add_page_number();
+    }
+})();
+
+// "Image settings" button in the Wiki 2 page editor toolbar: put the cursor on
+// an image line, click it, and pick the alignment and width. The image is
+// rewritten as an <img> with inline styles, which the wiki page and the PDF
+// both follow (inline styles override the PDF's centred-image default).
+(function () {
+    var WRAP_END = '<div style="clear:both" data-wrap-end="1"></div>';
+    var MD_IMAGE = /!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/;
+    var HTML_IMAGE = /<img\b[^>]*>/i;
+
+    var ALIGN_OPTIONS = [
+        { value: 'default', label: 'Default (as uploaded)' },
+        { value: 'left', label: 'Left' },
+        { value: 'center', label: 'Center' },
+        { value: 'right', label: 'Right' },
+        { value: 'wrap-left', label: 'Image left, text wraps on the right' },
+        { value: 'wrap-right', label: 'Image right, text wraps on the left' }
+    ];
+
+    var ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" '
+        + 'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        + '<rect x="3" y="4" width="9" height="8" rx="1"/><path d="M15 5h6M15 9h6M3 16h18M3 20h18"/></svg>';
+
+    function get_editor() {
+        var el = document.getElementById('wiki-editor');
+        return el && el.env && el.env.editor;
+    }
+
+    function escape_attr(text) {
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    }
+
+    // The first image on a line: {start, end, src, alt, align, width}
+    function find_image(line) {
+        var m = line.match(MD_IMAGE);
+        if (m) {
+            return { start: m.index, end: m.index + m[0].length, src: m[2], alt: m[1], align: 'default', width: '' };
+        }
+        m = line.match(HTML_IMAGE);
+        if (!m) return null;
+
+        var img = new DOMParser().parseFromString(m[0], 'text/html').querySelector('img');
+        if (!img) return null;
+        var style = img.style;
+        var align = 'default';
+        if (style.float === 'left') align = 'wrap-left';
+        else if (style.float === 'right') align = 'wrap-right';
+        else if (style.marginLeft === 'auto' && style.marginRight === 'auto') align = 'center';
+        else if (style.marginRight === 'auto') align = 'left';
+        else if (style.marginLeft === 'auto') align = 'right';
+
+        return {
+            start: m.index,
+            end: m.index + m[0].length,
+            src: img.getAttribute('src') || '',
+            alt: img.getAttribute('alt') || '',
+            align: align,
+            width: style.width || img.getAttribute('width') || ''
+        };
+    }
+
+    function normalise_width(width) {
+        width = String(width || '').trim();
+        if (/^\d+(\.\d+)?$/.test(width)) return width + 'px';
+        if (/^\d+(\.\d+)?(px|%)$/.test(width)) return width;
+        return '';
+    }
+
+    function image_markup(image, align, width) {
+        width = normalise_width(width);
+        if (align === 'default' && !width) {
+            return '![' + image.alt + '](' + image.src + ')';
+        }
+
+        var styles = [];
+        if (align === 'wrap-left') styles.push('float:left', 'margin:0.3em 1.2em 0.8em 0');
+        else if (align === 'wrap-right') styles.push('float:right', 'margin:0.3em 0 0.8em 1.2em');
+        else if (align === 'left') styles.push('display:block', 'margin:1em auto 1em 0');
+        else if (align === 'center') styles.push('display:block', 'margin:1em auto');
+        else if (align === 'right') styles.push('display:block', 'margin:1em 0 1em auto');
+
+        if (width) styles.push('width:' + width);
+        else if (align === 'wrap-left' || align === 'wrap-right') styles.push('width:40%');
+        styles.push('max-width:100%', 'height:auto');
+
+        return '<img src="' + escape_attr(image.src) + '" alt="' + escape_attr(image.alt)
+            + '" style="' + styles.join(';') + '">';
+    }
+
+    // The wrap-end marker that belongs to the image on `row`: the first one
+    // after it, before the next image.
+    function find_wrap_end(doc, row) {
+        for (var r = row + 1; r < doc.getLength(); r++) {
+            var line = doc.getLine(r);
+            if (line.indexOf('data-wrap-end') !== -1) return r;
+            if (MD_IMAGE.test(line) || HTML_IMAGE.test(line)) return -1;
+        }
+        return -1;
+    }
+
+    // Last line of the paragraph that follows the image, so text wrapping
+    // stops there instead of running into the next heading.
+    function paragraph_end(doc, row) {
+        var last = doc.getLength() - 1;
+        // Text on the image's own line is the paragraph that wraps.
+        var has_text = doc.getLine(row).replace(MD_IMAGE, '').replace(HTML_IMAGE, '').trim();
+        var r = has_text ? row : row + 1;
+        while (r <= last && !doc.getLine(r).trim()) r++;
+        if (r > last) return row;
+        while (r < last && doc.getLine(r + 1).trim()) r++;
+        return r;
+    }
+
+    function apply(editor, row, image, align, width) {
+        var doc = editor.session.getDocument();
+
+        var old_end = find_wrap_end(doc, row);
+        if (old_end !== -1) {
+            // Also drop the blank line that was added before the marker.
+            var first = old_end - 1 > row && !doc.getLine(old_end - 1).trim() ? old_end - 1 : old_end;
+            doc.removeFullLines(first, old_end);
+        }
+
+        doc.replace(
+            { start: { row: row, column: image.start }, end: { row: row, column: image.end } },
+            image_markup(image, align, width)
+        );
+
+        if (align === 'wrap-left' || align === 'wrap-right') {
+            var end = paragraph_end(doc, row);
+            var after = end + 1 < doc.getLength() ? doc.getLine(end + 1) : '';
+            var lines = ['', WRAP_END];
+            if (after.trim()) lines.push('');
+            doc.insertFullLines(end + 1, lines);
+        }
+        editor.focus();
+    }
+
+    function open_settings() {
+        var editor = get_editor();
+        if (!editor || !window.frappe || !frappe.ui || !frappe.ui.Dialog) return;
+
+        var row = editor.getCursorPosition().row;
+        var image = find_image(editor.session.getLine(row));
+        if (!image) {
+            frappe.msgprint({
+                title: 'Image settings',
+                message: 'Click on the line with the image first, then press this button again.'
+            });
+            return;
+        }
+
+        // Website pages load frappe.ui.Dialog but not the form controls it
+        // needs for its fields, so load those first.
+        if (!(frappe.ui.form && frappe.ui.form.make_control)) {
+            frappe.require('controls.bundle.js', function () {
+                show_dialog(editor, row, image);
+            });
+            return;
+        }
+        show_dialog(editor, row, image);
+    }
+
+    function show_dialog(editor, row, image) {
+        var dialog = new frappe.ui.Dialog({
+            title: 'Image settings',
+            fields: [
+                {
+                    fieldname: 'align', fieldtype: 'Select', label: 'Alignment',
+                    options: ALIGN_OPTIONS, default: image.align
+                },
+                {
+                    fieldname: 'width', fieldtype: 'Data', label: 'Width',
+                    default: image.width,
+                    description: 'e.g. 300 (pixels) or 50%. Leave empty for the original size.'
+                }
+            ],
+            primary_action_label: 'Apply',
+            primary_action: function (values) {
+                if (values.width && !normalise_width(values.width)) {
+                    frappe.msgprint('Width must be a number (pixels) or a percentage, like 300 or 50%.');
+                    return;
+                }
+                dialog.hide();
+                apply(editor, row, image, values.align || 'default', values.width);
+            }
+        });
+        dialog.show();
+    }
+
+    function add_button() {
+        var image_btn = document.querySelector('[data-mde-button="image"]');
+        if (!image_btn || document.querySelector('[data-mde-button="image-settings"]')) return;
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.setAttribute('data-mde-button', 'image-settings');
+        btn.title = 'Image settings (alignment and size)';
+        btn.innerHTML = ICON;
+        btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            open_settings();
+        });
+        image_btn.parentNode.insertBefore(btn, image_btn.nextSibling);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', add_button);
+    } else {
+        add_button();
+    }
+})();
